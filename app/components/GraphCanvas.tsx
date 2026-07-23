@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
+import { useI18n } from "@/app/i18n";
 import type {
   AnalysisGraph,
   DatabaseTable,
@@ -270,6 +271,7 @@ export function GraphCanvas({
   supplementalEdges = [],
   onSelect,
 }: GraphCanvasProps) {
+  const { t } = useI18n();
   const layout = useMemo(
     () => (mode === "database" ? buildDatabaseLayout(graph) : buildSourceLayout(graph)),
     [graph, mode],
@@ -289,11 +291,8 @@ export function GraphCanvas({
       <div className="graph-stage">
         <div className="graph-empty">
           <div className="empty-copy">
-            <h2>표시할 관계가 없습니다</h2>
-            <p>
-              현재 프로젝트에서 이 뷰에 해당하는 객체를 찾지 못했습니다. SQL 또는
-              스키마 파일이 포함된 폴더를 다시 불러와 보세요.
-            </p>
+            <h2>{t("graph.emptyTitle")}</h2>
+            <p>{t("graph.emptyDescription")}</p>
           </div>
         </div>
       </div>
@@ -301,7 +300,12 @@ export function GraphCanvas({
   }
 
   return (
-    <div className="graph-stage" aria-label={`${mode === "database" ? "DB ERD" : "소스 관계도"} 캔버스`}>
+    <div
+      className="graph-stage"
+      aria-label={t("graph.canvas", {
+        mode: mode === "database" ? "DB ERD" : t("workspace.sourceGraph"),
+      })}
+    >
       <div
         className="graph-world"
         style={{
@@ -322,7 +326,7 @@ export function GraphCanvas({
             className="graph-edge-layer"
             viewBox={`0 0 ${layout.width} ${layout.height}`}
             role="img"
-            aria-label={`${edges.length}개의 관계`}
+            aria-label={t("graph.edgeCount", { count: edges.length })}
           >
             <defs>
               <marker
@@ -389,7 +393,14 @@ export function GraphCanvas({
                   width: node.width,
                   minHeight: node.height,
                 }}
-                aria-label={`${node.nodeType === "table" ? "테이블" : "소스 파일"} ${node.title}, 연결 ${connectionCount}개`}
+                aria-label={t("graph.nodeLabel", {
+                  type:
+                    node.nodeType === "table"
+                      ? t("graph.table")
+                      : t("graph.sourceFile"),
+                  title: node.title,
+                  count: connectionCount,
+                })}
                 aria-pressed={selected}
                 onClick={() => onSelect(node.id)}
               >
@@ -416,16 +427,20 @@ export function GraphCanvas({
                       ))}
                     </span>
                     {node.table.columns.length > MAX_VISIBLE_COLUMNS ? (
-                      <span className="node-more">+ {node.table.columns.length - MAX_VISIBLE_COLUMNS}개 컬럼</span>
+                      <span className="node-more">
+                        {t("graph.moreColumns", {
+                          count: node.table.columns.length - MAX_VISIBLE_COLUMNS,
+                        })}
+                      </span>
                     ) : null}
                   </>
                 ) : (
                   <span className="source-node-body">
                     <span className="source-node-path">{node.file?.path}</span>
                     <span className="source-node-stats">
-                      <span>조회 <strong>{node.readCount}</strong></span>
-                      <span>쓰기 <strong>{node.writeCount}</strong></span>
-                      <span>참조 <strong>{node.importCount}</strong></span>
+                      <span>{t("graph.read")} <strong>{node.readCount}</strong></span>
+                      <span>{t("graph.write")} <strong>{node.writeCount}</strong></span>
+                      <span>{t("graph.reference")} <strong>{node.importCount}</strong></span>
                     </span>
                   </span>
                 )}
@@ -435,14 +450,17 @@ export function GraphCanvas({
         </div>
       </div>
 
-      <div className="graph-legend" aria-label="관계 범례">
+      <div className="graph-legend" aria-label={t("graph.legend")}>
         <span className="legend-item"><span className="legend-line is-fk" /> FK</span>
         <span className="legend-item"><span className="legend-line is-read" /> READ</span>
         <span className="legend-item"><span className="legend-line is-write" /> WRITE</span>
-        <span className="legend-item"><span className="legend-line is-inferred" /> 추론</span>
+        <span className="legend-item"><span className="legend-line is-inferred" /> {t("graph.inferred")}</span>
       </div>
       <span className="sr-only" aria-live="polite">
-        {layout.nodes.length}개 노드, {edges.length}개 관계로 업데이트됨
+        {t("graph.updated", {
+          nodes: layout.nodes.length,
+          edges: edges.length,
+        })}
       </span>
     </div>
   );

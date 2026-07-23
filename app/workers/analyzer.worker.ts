@@ -65,7 +65,7 @@ function postInvalidRequest(value: unknown): void {
     ok: false,
     error: {
       code: "INVALID_REQUEST",
-      message: "소스 분석 Web Worker 요청 형식이 올바르지 않습니다.",
+      message: "The source-analysis Web Worker request format is invalid.",
     },
   };
   workerScope.postMessage(response);
@@ -95,7 +95,7 @@ workerScope.addEventListener("message", (event) => {
       ok: false,
       error: {
         code: "ANALYSIS_FAILED",
-        message: "소스 분석 Web Worker에서 분석을 완료하지 못했습니다.",
+        message: "The source-analysis Web Worker could not complete the analysis.",
       },
     };
     workerScope.postMessage(response);

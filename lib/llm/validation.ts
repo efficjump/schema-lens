@@ -57,20 +57,20 @@ function tooLarge(message: string): never {
 export async function readJsonBody(request: Request): Promise<unknown> {
   const contentLength = Number(request.headers.get("content-length"));
   if (Number.isFinite(contentLength) && contentLength > MAX_REQUEST_CHARS) {
-    tooLarge("요청 본문이 허용 크기를 초과했습니다.");
+    tooLarge("The request body exceeds the allowed size.");
   }
 
   const body = await request.text();
   if (body.length > MAX_REQUEST_CHARS) {
-    tooLarge("요청 본문이 허용 크기를 초과했습니다.");
+    tooLarge("The request body exceeds the allowed size.");
   }
 
-  if (!body.trim()) requestError("JSON 요청 본문이 필요합니다.");
+  if (!body.trim()) requestError("A JSON request body is required.");
 
   try {
     return JSON.parse(body) as unknown;
   } catch {
-    requestError("유효한 JSON 요청 본문이 필요합니다.");
+    requestError("The request body must contain valid JSON.");
   }
 }
 
@@ -80,12 +80,12 @@ function requiredString(
   maxLength: number,
 ): string {
   if (typeof value !== "string" || !value.trim()) {
-    requestError(`${field}에는 비어 있지 않은 문자열이 필요합니다.`);
+    requestError(`${field} must be a non-empty string.`);
   }
 
   const normalized = value.trim();
   if (normalized.length > maxLength) {
-    tooLarge(`${field}의 길이가 허용 범위를 초과했습니다.`);
+    tooLarge(`${field} exceeds the allowed length.`);
   }
   return normalized;
 }
@@ -97,29 +97,29 @@ function optionalString(
   fallback: string,
 ): string {
   if (value === undefined || value === null || value === "") return fallback;
-  if (typeof value !== "string") requestError(`${field}에는 문자열이 필요합니다.`);
-  if (value.length > maxLength) tooLarge(`${field}의 길이가 허용 범위를 초과했습니다.`);
+  if (typeof value !== "string") requestError(`${field} must be a string.`);
+  if (value.length > maxLength) tooLarge(`${field} exceeds the allowed length.`);
   return value;
 }
 
 function nullableLine(value: unknown, field: string): number | null {
   if (value === undefined || value === null) return null;
   if (!Number.isSafeInteger(value) || (value as number) < 1) {
-    requestError(`${field}에는 양의 정수 또는 null이 필요합니다.`);
+    requestError(`${field} must be a positive integer or null.`);
   }
   return value as number;
 }
 
 function parseExcerpts(value: unknown, field: string): SourceExcerpt[] {
-  if (!Array.isArray(value)) requestError(`${field}에는 배열이 필요합니다.`);
-  if (value.length > MAX_EXCERPTS) tooLarge(`${field} 항목 수가 허용 범위를 초과했습니다.`);
+  if (!Array.isArray(value)) requestError(`${field} must be an array.`);
+  if (value.length > MAX_EXCERPTS) tooLarge(`${field} contains too many items.`);
 
   const ids = new Set<string>();
   return value.map((item, index) => {
-    if (!isRecord(item)) requestError(`${field}[${index}]에는 객체가 필요합니다.`);
+    if (!isRecord(item)) requestError(`${field}[${index}] must be an object.`);
 
     const id = requiredString(item.id, `${field}[${index}].id`, 200);
-    if (ids.has(id)) requestError(`${field}의 id는 고유해야 합니다.`, [id]);
+    if (ids.has(id)) requestError(`${field} ids must be unique.`, [id]);
     ids.add(id);
 
     const content = requiredString(
@@ -130,7 +130,7 @@ function parseExcerpts(value: unknown, field: string): SourceExcerpt[] {
     const startLine = nullableLine(item.startLine, `${field}[${index}].startLine`);
     const endLine = nullableLine(item.endLine, `${field}[${index}].endLine`);
     if (startLine !== null && endLine !== null && endLine < startLine) {
-      requestError(`${field}[${index}]의 endLine은 startLine보다 작을 수 없습니다.`);
+      requestError(`${field}[${index}].endLine cannot be less than startLine.`);
     }
 
     return {
@@ -150,23 +150,23 @@ function parseExcerpts(value: unknown, field: string): SourceExcerpt[] {
 }
 
 function parseGraph(value: unknown): Record<string, JsonValue> {
-  if (!isRecord(value)) requestError("graph에는 JSON 객체가 필요합니다.");
+  if (!isRecord(value)) requestError("graph must be a JSON object.");
 
   let serialized: string;
   try {
     serialized = JSON.stringify(value);
   } catch {
-    requestError("graph는 JSON으로 직렬화할 수 있어야 합니다.");
+    requestError("graph must be serializable as JSON.");
   }
 
   if (serialized.length > MAX_GRAPH_CHARS) {
-    tooLarge("graph가 허용 크기를 초과했습니다. compact graph로 줄여 주세요.");
+    tooLarge("graph exceeds the allowed size. Reduce it to a compact graph.");
   }
   return value as Record<string, JsonValue>;
 }
 
 export function parseMappingRequest(value: unknown): MappingRequest {
-  if (!isRecord(value)) requestError("요청 본문에는 JSON 객체가 필요합니다.");
+  if (!isRecord(value)) requestError("The request body must be a JSON object.");
 
   const focus =
     value.focus === undefined || value.focus === null || value.focus === ""
@@ -182,15 +182,15 @@ export function parseMappingRequest(value: unknown): MappingRequest {
 
 function parseConversation(value: unknown): ConversationTurn[] {
   if (value === undefined || value === null) return [];
-  if (!Array.isArray(value)) requestError("conversation에는 배열이 필요합니다.");
+  if (!Array.isArray(value)) requestError("conversation must be an array.");
   if (value.length > MAX_CONVERSATION_TURNS) {
-    tooLarge("conversation 항목 수가 허용 범위를 초과했습니다.");
+    tooLarge("conversation contains too many items.");
   }
 
   return value.map((item, index) => {
-    if (!isRecord(item)) requestError(`conversation[${index}]에는 객체가 필요합니다.`);
+    if (!isRecord(item)) requestError(`conversation[${index}] must be an object.`);
     if (item.role !== "user" && item.role !== "assistant") {
-      requestError(`conversation[${index}].role은 user 또는 assistant여야 합니다.`);
+      requestError(`conversation[${index}].role must be user or assistant.`);
     }
     return {
       role: item.role,
@@ -204,7 +204,7 @@ function parseConversation(value: unknown): ConversationTurn[] {
 }
 
 export function parseAskRequest(value: unknown): AskRequest {
-  if (!isRecord(value)) requestError("요청 본문에는 JSON 객체가 필요합니다.");
+  if (!isRecord(value)) requestError("The request body must be a JSON object.");
 
   return {
     question: requiredString(value.question, "question", MAX_QUESTION_CHARS),
@@ -215,30 +215,30 @@ export function parseAskRequest(value: unknown): AskRequest {
 }
 
 function modelRecord(value: unknown, field: string): Record<string, unknown> {
-  if (!isRecord(value)) outputError(`모델 응답의 ${field} 형식이 올바르지 않습니다.`);
+  if (!isRecord(value)) outputError(`The model response has an invalid ${field} value.`);
   return value;
 }
 
 function modelString(value: unknown, field: string): string {
-  if (typeof value !== "string") outputError(`모델 응답의 ${field} 형식이 올바르지 않습니다.`);
+  if (typeof value !== "string") outputError(`The model response has an invalid ${field} value.`);
   return value;
 }
 
 function modelStringArray(value: unknown, field: string): string[] {
   if (!Array.isArray(value) || value.some((item) => typeof item !== "string")) {
-    outputError(`모델 응답의 ${field} 형식이 올바르지 않습니다.`);
+    outputError(`The model response has an invalid ${field} value.`);
   }
   return value as string[];
 }
 
 function modelArray(value: unknown, field: string): unknown[] {
-  if (!Array.isArray(value)) outputError(`모델 응답의 ${field} 형식이 올바르지 않습니다.`);
+  if (!Array.isArray(value)) outputError(`The model response has an invalid ${field} value.`);
   return value;
 }
 
 function modelConfidence(value: unknown, field: string): number {
   if (typeof value !== "number" || !Number.isFinite(value) || value < 0 || value > 1) {
-    outputError(`모델 응답의 ${field} 형식이 올바르지 않습니다.`);
+    outputError(`The model response has an invalid ${field} value.`);
   }
   return value;
 }
@@ -247,7 +247,7 @@ function parseMappingNode(value: unknown, index: number): MappingNodeAddition {
   const item = modelRecord(value, `additions.nodes[${index}]`);
   const layer = modelString(item.layer, `additions.nodes[${index}].layer`);
   if (!["database", "source", "domain", "cross_layer"].includes(layer)) {
-    outputError(`모델 응답의 additions.nodes[${index}].layer 값이 올바르지 않습니다.`);
+    outputError(`The model response has an invalid additions.nodes[${index}].layer value.`);
   }
   return {
     id: modelString(item.id, `additions.nodes[${index}].id`),
@@ -320,7 +320,7 @@ function parseDiagnostic(value: unknown, index: number): MappingDiagnostic {
   const item = modelRecord(value, `diagnostics[${index}]`);
   const severity = modelString(item.severity, `diagnostics[${index}].severity`);
   if (!["info", "warning", "error"].includes(severity)) {
-    outputError(`모델 응답의 diagnostics[${index}].severity 값이 올바르지 않습니다.`);
+    outputError(`The model response has an invalid diagnostics[${index}].severity value.`);
   }
   return {
     severity: severity as MappingDiagnostic["severity"],
@@ -398,7 +398,7 @@ function reconciliationDiagnostic(message: string, relatedNodeIds: string[] = []
     message,
     relatedNodeIds,
     evidenceIds: [],
-    suggestion: "입력 그래프와 근거 ID를 확인한 뒤 다시 매핑하세요.",
+    suggestion: "Check the input graph and evidence IDs before mapping again.",
   };
 }
 
@@ -416,7 +416,7 @@ export function reconcileMappingResult(
   const nodes = result.additions.nodes.flatMap((node) => {
     if (!node.id || graphIds.has(node.id) || generatedIds.has(node.id)) {
       serverDiagnostics.push(
-        reconciliationDiagnostic(`중복되거나 비어 있는 추가 노드 ID를 제외했습니다: ${node.id}`),
+        reconciliationDiagnostic(`Dropped an empty or duplicate added-node ID: ${node.id}`),
       );
       return [];
     }
@@ -426,7 +426,7 @@ export function reconcileMappingResult(
     if (mappedNodeIds.length === 0 && knownEvidenceIds.length === 0) {
       serverDiagnostics.push(
         reconciliationDiagnostic(
-          `기존 그래프나 소스 근거로 추적할 수 없는 추가 노드를 제외했습니다: ${node.id}`,
+          `Dropped an added node that could not be traced to the graph or source evidence: ${node.id}`,
         ),
       );
       return [];
@@ -450,7 +450,7 @@ export function reconcileMappingResult(
     ) {
       serverDiagnostics.push(
         reconciliationDiagnostic(
-          `중복 ID, 알 수 없는 끝점 또는 소스 근거가 없는 추가 관계를 제외했습니다: ${edge.id}`,
+          `Dropped an added relationship with a duplicate ID, unknown endpoint, or no source evidence: ${edge.id}`,
           [edge.source, edge.target].filter((id) => endpointIds.has(id)),
         ),
       );
@@ -466,7 +466,7 @@ export function reconcileMappingResult(
     if (!endpointIds.has(alias.nodeId) || knownEvidenceIds.length === 0) {
       serverDiagnostics.push(
         reconciliationDiagnostic(
-          `알 수 없는 노드를 가리키거나 소스 근거가 없는 별칭을 제외했습니다: ${alias.term}`,
+          `Dropped an alias that points to an unknown node or has no source evidence: ${alias.term}`,
         ),
       );
       return [];
@@ -492,7 +492,7 @@ function parseCitation(value: unknown, index: number): AnswerCitation {
   const item = modelRecord(value, `citations[${index}]`);
   const kind = modelString(item.kind, `citations[${index}].kind`);
   if (kind !== "graph" && kind !== "excerpt") {
-    outputError(`모델 응답의 citations[${index}].kind 값이 올바르지 않습니다.`);
+    outputError(`The model response has an invalid citations[${index}].kind value.`);
   }
   return {
     id: modelString(item.id, `citations[${index}].id`),
@@ -518,7 +518,7 @@ function parseAnswerResult(value: unknown): AnswerResult {
   const result = modelRecord(value, "root");
   const status = modelString(result.status, "status");
   if (status !== "answered" && status !== "insufficient_evidence") {
-    outputError("모델 응답의 status 값이 올바르지 않습니다.");
+    outputError("The model response has an invalid status value.");
   }
   return {
     status,
@@ -596,13 +596,13 @@ export function reconcileAnswerResult(
   const limitations = [...result.limitations];
   if (invalidCitationCount > 0) {
     limitations.push(
-      `검증할 수 없는 인용 ${invalidCitationCount}개를 응답에서 제외했습니다.`,
+      `${invalidCitationCount} unverifiable citations were removed from the response.`,
     );
   }
 
   if (invalidClaimCount > 0) {
     limitations.push(
-      `검증 가능한 인용이 없는 주장 ${invalidClaimCount}개를 응답에서 제외했습니다.`,
+      `${invalidClaimCount} claims without verifiable citations were removed from the response.`,
     );
   }
 
@@ -611,13 +611,13 @@ export function reconcileAnswerResult(
       ...result,
       status: "insufficient_evidence",
       answer:
-        "제공된 그래프와 소스 근거에서 검증 가능한 인용을 찾지 못해 답변을 확정할 수 없습니다.",
+        "The answer could not be confirmed because no verifiable citation was found in the supplied graph and source evidence.",
       citations: [],
       claims: [],
       referencedNodeIds,
       limitations: [
         ...limitations,
-        "검증 가능한 그래프 또는 소스 인용이 필요합니다.",
+        "A verifiable graph or source citation is required.",
       ],
     };
   }

@@ -99,7 +99,7 @@ function safeErrorMessage(value: unknown, fallback: string): string {
 }
 
 function createAbortError(): Error {
-  const message = "소스 분석이 취소되었습니다.";
+  const message = "Source analysis was cancelled.";
   if (typeof DOMException === "function") {
     return new DOMException(message, "AbortError");
   }
@@ -127,7 +127,7 @@ export function analyzeSourceProjectInWorker(
   if (options.signal?.aborted) return Promise.reject(createAbortError());
   if (typeof Worker !== "function") {
     return Promise.reject(
-      new Error("이 브라우저에서는 소스 분석 Web Worker를 사용할 수 없습니다."),
+      new Error("This browser does not support the source-analysis Web Worker."),
     );
   }
 
@@ -142,7 +142,7 @@ export function analyzeSourceProjectInWorker(
         { type: "module", name: "schema-lens-analyzer" },
       );
     } catch {
-      reject(new Error("소스 분석 Web Worker를 시작하지 못했습니다."));
+      reject(new Error("The source-analysis Web Worker could not be started."));
       return;
     }
 
@@ -174,7 +174,7 @@ export function analyzeSourceProjectInWorker(
         response.requestId !== requestId
       ) {
         finish(() =>
-          reject(new Error("소스 분석 Web Worker가 올바르지 않은 응답을 반환했습니다.")),
+          reject(new Error("The source-analysis Web Worker returned an invalid response.")),
         );
         return;
       }
@@ -185,7 +185,7 @@ export function analyzeSourceProjectInWorker(
             new Error(
               safeErrorMessage(
                 response.error.message,
-                "소스 분석 Web Worker에서 분석을 완료하지 못했습니다.",
+                "The source-analysis Web Worker could not complete the analysis.",
               ),
             ),
           ),
@@ -198,13 +198,13 @@ export function analyzeSourceProjectInWorker(
     function handleError(event: ErrorEvent) {
       event.preventDefault();
       finish(() =>
-        reject(new Error("소스 분석 Web Worker 실행 중 오류가 발생했습니다.")),
+        reject(new Error("The source-analysis Web Worker encountered an error.")),
       );
     }
 
     function handleMessageError() {
       finish(() =>
-        reject(new Error("소스 분석 Web Worker 응답을 읽지 못했습니다.")),
+        reject(new Error("The source-analysis Web Worker response could not be read.")),
       );
     }
 
@@ -232,7 +232,7 @@ export function analyzeSourceProjectInWorker(
       worker.postMessage(request);
     } catch {
       finish(() =>
-        reject(new Error("소스 분석 요청을 Web Worker에 전달하지 못했습니다.")),
+        reject(new Error("The source-analysis request could not be sent to the Web Worker.")),
       );
     }
   });

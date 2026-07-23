@@ -15,6 +15,7 @@ import {
   findMatchingSourceLines,
   sliceSourceLine,
 } from "@/lib/source-workspace";
+import { type Translate, useI18n } from "@/app/i18n";
 
 export type SourceDocumentStatus = "loading" | "ready" | "error";
 
@@ -81,8 +82,8 @@ function basename(path: string): string {
   return segments.at(-1) ?? path;
 }
 
-function formatBytes(value: number): string {
-  if (!Number.isFinite(value) || value < 0) return "크기 미상";
+function formatBytes(value: number, t: Translate): string {
+  if (!Number.isFinite(value) || value < 0) return t("source.unknownSize");
   if (value < 1_024) return `${Math.round(value)} B`;
   if (value < 1_024 * 1_024) return `${(value / 1_024).toFixed(1)} KB`;
   return `${(value / (1_024 * 1_024)).toFixed(1)} MB`;
@@ -110,6 +111,7 @@ export function SourceCodeWorkbench({
   onSelectEvidence,
   onSelectLocation,
 }: SourceCodeWorkbenchProps) {
+  const { locale, t } = useI18n();
   const idPrefix = useId().replace(/:/g, "");
   const tabRefs = useRef(new Map<string, HTMLButtonElement>());
   const codeLinesRef = useRef<HTMLDivElement>(null);
@@ -311,18 +313,21 @@ export function SourceCodeWorkbench({
 
   if (!documents.length) {
     return (
-      <section className="code-workbench code-empty" aria-label="소스 코드 작업 영역">
+      <section
+        className="code-workbench code-empty"
+        aria-label={t("source.workspace")}
+      >
         <div className="code-state">
-          <strong>열린 소스 파일이 없습니다</strong>
-          <p>소스 트리에서 파일을 선택하거나 근거의 파일 위치를 열어 주세요.</p>
+          <strong>{t("source.openEmptyTitle")}</strong>
+          <p>{t("source.openEmptyDescription")}</p>
         </div>
       </section>
     );
   }
 
   return (
-    <section className="code-workbench" aria-label="소스 코드 작업 영역">
-      <div className="code-tabs" role="tablist" aria-label="열린 소스 파일">
+    <section className="code-workbench" aria-label={t("source.workspace")}>
+      <div className="code-tabs" role="tablist" aria-label={t("source.openTabs")}>
         {documents.map((document, index) => {
           const selected = document.path === activePath;
           const keyboardCurrent = selected || (!hasActiveTab && index === 0);
@@ -353,17 +358,17 @@ export function SourceCodeWorkbench({
               >
                 <span className="code-tab-name">{name}</span>
                 {documentStatus(document) === "error" ? (
-                  <span className="code-tab-status" aria-label="불러오기 오류">!</span>
+                  <span className="code-tab-status" aria-label={t("source.loadError")}>!</span>
                 ) : documentStatus(document) === "loading" ? (
-                  <span className="code-tab-status" aria-label="불러오는 중">…</span>
+                  <span className="code-tab-status" aria-label={t("source.loading")}>…</span>
                 ) : null}
               </button>
               <button
                 className="code-tab-close"
                 type="button"
                 tabIndex={-1}
-                aria-label={`${name} 탭 닫기`}
-                title="탭 닫기"
+                aria-label={t("source.closeTab", { name })}
+                title={t("source.closeTabTitle")}
                 onClick={() => closeAndFocusAdjacent(document, index)}
               >
                 ×
@@ -375,8 +380,8 @@ export function SourceCodeWorkbench({
 
       {!activeDocument ? (
         <div className="code-state code-state-missing" role="status">
-          <strong>활성 파일을 찾을 수 없습니다</strong>
-          <p>열린 탭에서 파일을 다시 선택해 주세요.</p>
+          <strong>{t("source.activeMissingTitle")}</strong>
+          <p>{t("source.activeMissingDescription")}</p>
         </div>
       ) : (
         <div
@@ -390,7 +395,7 @@ export function SourceCodeWorkbench({
         >
           <header className="code-header">
             <div className="code-file-context">
-              <nav className="code-breadcrumb" aria-label="소스 파일 경로">
+              <nav className="code-breadcrumb" aria-label={t("source.path")}>
                 {activeDocument.path.split("/").filter(Boolean).map((segment, index, segments) => (
                   <span className="code-breadcrumb-part" key={`${segment}-${index}`}>
                     <span>{segment}</span>
@@ -400,10 +405,15 @@ export function SourceCodeWorkbench({
               </nav>
               <div className="code-meta">
                 <span>{activeDocument.language || "plain text"}</span>
-                <span>{totalLines.toLocaleString()}줄</span>
-                <span>{formatBytes(activeDocument.byteSize ?? content.length)}</span>
+                <span>{t("source.lines", { count: totalLines.toLocaleString(locale) })}</span>
+                <span>{formatBytes(activeDocument.byteSize ?? content.length, t)}</span>
                 {revealedRange ? (
-                  <span>선택 {revealedRange.startLine}–{revealedRange.endLine}행</span>
+                  <span>
+                    {t("source.selection", {
+                      start: revealedRange.startLine,
+                      end: revealedRange.endLine,
+                    })}
+                  </span>
                 ) : null}
               </div>
             </div>
@@ -411,12 +421,12 @@ export function SourceCodeWorkbench({
             {activeStatus === "ready" ? (
               <div className="code-search" role="search">
                 <label className="code-search-label">
-                  <span className="code-sr-only">현재 파일에서 검색</span>
+                  <span className="code-sr-only">{t("source.searchLabel")}</span>
                   <input
                     className="code-search-input"
                     type="search"
                     value={searchQuery}
-                    placeholder="파일 내 검색"
+                    placeholder={t("source.searchPlaceholder")}
                     spellCheck={false}
                     autoComplete="off"
                     onChange={(event) => setSearchState({
@@ -430,20 +440,26 @@ export function SourceCodeWorkbench({
                 <output
                   className="code-search-count"
                   aria-live="polite"
-                  title={searchTruncated ? `검색 결과가 ${SEARCH_RESULT_LIMIT.toLocaleString()}개를 초과해 앞부분만 표시합니다.` : undefined}
+                  title={
+                    searchTruncated
+                      ? t("source.searchTruncated", {
+                          count: SEARCH_RESULT_LIMIT.toLocaleString(locale),
+                        })
+                      : undefined
+                  }
                 >
                   {searchQuery
                     ? searchPending
-                      ? "검색 중…"
+                      ? t("source.searching")
                       : matchingLines.length
                       ? `${clamp(activeMatchIndex, 0, matchingLines.length - 1) + 1}/${matchingLines.length}${searchTruncated ? "+" : ""}`
-                      : "결과 없음"
+                      : t("source.noResults")
                     : ""}
                 </output>
                 <button
                   className="code-search-action"
                   type="button"
-                  aria-label="이전 검색 결과"
+                  aria-label={t("source.previousResult")}
                   disabled={!matchingLines.length}
                   onClick={() => activateMatch(-1)}
                 >
@@ -452,7 +468,7 @@ export function SourceCodeWorkbench({
                 <button
                   className="code-search-action"
                   type="button"
-                  aria-label="다음 검색 결과"
+                  aria-label={t("source.nextResult")}
                   disabled={!matchingLines.length}
                   onClick={() => activateMatch(1)}
                 >
@@ -464,23 +480,23 @@ export function SourceCodeWorkbench({
 
           {activeStatus === "loading" ? (
             <div className="code-state code-state-loading" role="status" aria-live="polite">
-              <strong>소스 파일을 불러오는 중입니다</strong>
+              <strong>{t("source.loadingTitle")}</strong>
               <p>{activeDocument.path}</p>
             </div>
           ) : activeStatus === "error" ? (
             <div className="code-state code-state-error" role="alert">
-              <strong>소스 파일을 열지 못했습니다</strong>
-              <p>{activeDocument.error || "브라우저가 이 파일을 읽지 못했습니다."}</p>
+              <strong>{t("source.failedTitle")}</strong>
+              <p>{activeDocument.error || t("source.browserFailed")}</p>
               {onRetryDocument ? (
                 <button className="code-state-action" type="button" onClick={() => onRetryDocument(activeDocument.path)}>
-                  다시 시도
+                  {t("source.retry")}
                 </button>
               ) : null}
             </div>
           ) : content.length === 0 ? (
             <div className="code-state code-state-empty" role="status">
-              <strong>빈 파일입니다</strong>
-              <p>표시할 소스 코드가 없습니다.</p>
+              <strong>{t("source.emptyTitle")}</strong>
+              <p>{t("source.emptyDescription")}</p>
             </div>
           ) : (
             <div className="code-viewer">
@@ -491,10 +507,14 @@ export function SourceCodeWorkbench({
                   disabled={lineWindow.startLine <= 1}
                   onClick={() => moveWindow(-1)}
                 >
-                  이전 구간
+                  {t("source.previousWindow")}
                 </button>
                 <span className="code-window-status" aria-live="polite">
-                  {lineWindow.startLine.toLocaleString()}–{lineWindow.endLine.toLocaleString()} / {totalLines.toLocaleString()}줄
+                  {t("source.window", {
+                    start: lineWindow.startLine.toLocaleString(locale),
+                    end: lineWindow.endLine.toLocaleString(locale),
+                    total: totalLines.toLocaleString(locale),
+                  })}
                 </span>
                 <button
                   className="code-window-action"
@@ -502,7 +522,7 @@ export function SourceCodeWorkbench({
                   disabled={lineWindow.endLine >= totalLines}
                   onClick={() => moveWindow(1)}
                 >
-                  다음 구간
+                  {t("source.nextWindow")}
                 </button>
               </div>
 
@@ -510,7 +530,7 @@ export function SourceCodeWorkbench({
                 ref={codeLinesRef}
                 className="code-lines"
                 role="region"
-                aria-label={`${activeDocument.path} 읽기 전용 소스 코드`}
+                aria-label={t("source.readOnly", { path: activeDocument.path })}
                 tabIndex={0}
               >
                 <code className="code-content" dir="ltr" translate="no">
@@ -540,8 +560,17 @@ export function SourceCodeWorkbench({
                                 className="code-evidence-marker"
                                 type="button"
                                 key={item.id}
-                                title={item.label || `${item.startLine}행 근거`}
-                                aria-label={item.label || `${lineNumber}행의 ${item.kind || "분석"} 근거`}
+                                title={
+                                  item.label ||
+                                  t("source.lineEvidence", { line: item.startLine })
+                                }
+                                aria-label={
+                                  item.label ||
+                                  t("source.analysisEvidence", {
+                                    line: lineNumber,
+                                    kind: item.kind || t("source.analysisKind"),
+                                  })
+                                }
                                 onClick={() => onSelectEvidence(item)}
                               >
                                 <span aria-hidden="true">●</span>
@@ -550,7 +579,10 @@ export function SourceCodeWorkbench({
                               <span
                                 className="code-evidence-marker"
                                 key={item.id}
-                                title={item.label || `${item.startLine}행 근거`}
+                                title={
+                                  item.label ||
+                                  t("source.lineEvidence", { line: item.startLine })
+                                }
                                 aria-hidden="true"
                               >
                                 ●
@@ -562,7 +594,7 @@ export function SourceCodeWorkbench({
                           <button
                             className="code-line-number"
                             type="button"
-                            aria-label={`${lineNumber}행 선택`}
+                            aria-label={t("source.selectLine", { line: lineNumber })}
                             aria-pressed={inRevealedRange}
                             onClick={() => onSelectLocation({
                               path: activeDocument.path,

@@ -47,7 +47,7 @@ export function enforceLlmRateLimit(request: Request): void {
     const retryAfterSeconds = Math.max(1, Math.ceil((bucket.resetAt - now) / 1_000));
     throw new LlmServiceError({
       code: "LLM_RATE_LIMITED",
-      message: "LLM 요청이 너무 많습니다. 잠시 후 다시 시도해 주세요.",
+      message: "Too many LLM requests were received. Try again shortly.",
       httpStatus: 429,
       retryable: true,
       retryAfterSeconds,

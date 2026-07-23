@@ -156,7 +156,7 @@ function parseStructuredJson<T>(text: string): T {
 
   throw new LlmServiceError({
     code: "LLM_INVALID_OUTPUT",
-    message: "모델 응답을 구조화된 JSON으로 해석하지 못했습니다.",
+    message: "The model response could not be parsed as structured JSON.",
     httpStatus: 502,
     retryable: true,
   });
@@ -185,7 +185,7 @@ function providerHttpError(status: number): LlmServiceError {
   if (status === 429) {
     return new LlmServiceError({
       code: "LLM_RATE_LIMITED",
-      message: "LLM API 요청 한도에 도달했습니다. 잠시 후 다시 시도해 주세요.",
+      message: "The LLM API request limit was reached. Try again shortly.",
       httpStatus: 429,
       retryable: true,
     });
@@ -193,13 +193,13 @@ function providerHttpError(status: number): LlmServiceError {
   if (status === 401 || status === 403) {
     return new LlmServiceError({
       code: "LLM_PROVIDER_ERROR",
-      message: "LLM API 인증 또는 모델 접근 권한을 확인해 주세요.",
+      message: "Check the LLM API credentials and model access permissions.",
       httpStatus: 502,
     });
   }
   return new LlmServiceError({
     code: "LLM_PROVIDER_ERROR",
-    message: "LLM API가 요청을 처리하지 못했습니다.",
+    message: "The LLM API could not complete the request.",
     httpStatus: 502,
     retryable: status >= 500,
   });
@@ -279,8 +279,8 @@ export async function createStructuredResponse<T>(options: {
     throw new LlmServiceError({
       code: "LLM_NOT_CONFIGURED",
       message: config.invalidApiUrl
-        ? "LLM_API_URL은 HTTPS 주소 또는 로컬 개발 주소여야 합니다."
-        : "LLM_API_URL과 LLM_MODEL이 설정되지 않아 서버 LLM 기능을 사용할 수 없습니다.",
+        ? "LLM_API_URL must use HTTPS or a local development address."
+        : "Server-side LLM features require both LLM_API_URL and LLM_MODEL.",
       httpStatus: 503,
       fallback: true,
     });
@@ -308,14 +308,14 @@ export async function createStructuredResponse<T>(options: {
     if (error instanceof Error && error.name === "AbortError") {
       throw new LlmServiceError({
         code: "LLM_TIMEOUT",
-        message: "LLM API 응답 대기 시간이 초과되었습니다.",
+        message: "The LLM API response timed out.",
         httpStatus: 504,
         retryable: true,
       });
     }
     throw new LlmServiceError({
       code: "LLM_PROVIDER_ERROR",
-      message: "LLM API에 연결하지 못했습니다.",
+      message: "The LLM API could not be reached.",
       httpStatus: 502,
       retryable: true,
     });
@@ -328,7 +328,7 @@ export async function createStructuredResponse<T>(options: {
   if (payload.error) {
     throw new LlmServiceError({
       code: "LLM_PROVIDER_ERROR",
-      message: "LLM API 응답에 오류가 포함되어 있습니다.",
+      message: "The LLM API response contained an error.",
       httpStatus: 502,
       retryable: true,
     });
@@ -338,7 +338,7 @@ export async function createStructuredResponse<T>(options: {
   if (extracted.refusal) {
     throw new LlmServiceError({
       code: "LLM_REFUSAL",
-      message: "모델이 이 요청에 대한 응답을 거절했습니다.",
+      message: "The model declined this request.",
       httpStatus: 422,
     });
   }
@@ -347,7 +347,7 @@ export async function createStructuredResponse<T>(options: {
   if (incompleteReason || !extracted.text) {
     throw new LlmServiceError({
       code: "LLM_INCOMPLETE",
-      message: "모델 응답이 완료되지 않았습니다.",
+      message: "The model response was incomplete.",
       httpStatus: 502,
       retryable: true,
     });
@@ -365,7 +365,7 @@ export function errorResponse(error: unknown): Response {
       ? error
       : new LlmServiceError({
           code: "LLM_PROVIDER_ERROR",
-          message: "LLM 요청을 처리하는 중 예기치 않은 오류가 발생했습니다.",
+          message: "An unexpected error occurred while processing the LLM request.",
           httpStatus: 500,
         });
 

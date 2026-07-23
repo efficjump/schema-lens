@@ -13,6 +13,7 @@ import {
   type SourceDocumentDescriptor,
   type SourceTreeNode,
 } from "@/lib/source-workspace";
+import { useI18n } from "@/app/i18n";
 
 interface VisibleTreeRow {
   node: SourceTreeNode;
@@ -73,6 +74,7 @@ export function SourceTree({
   onToggleFolder,
   onOpenFile,
 }: SourceTreeProps) {
+  const { locale, t } = useI18n();
   const buttonRefs = useRef(new Map<string, HTMLButtonElement>());
   const [focusedPath, setFocusedPath] = useState<string | null>(activePath);
   const fullTree = useMemo(() => buildSourceTree(documents), [documents]);
@@ -140,13 +142,13 @@ export function SourceTree({
   if (!rows.length) {
     return (
       <div className="source-tree-empty" role="status">
-        {query.trim() ? "일치하는 파일이 없습니다." : "표시할 소스 파일이 없습니다."}
+        {query.trim() ? t("tree.noMatch") : t("tree.empty")}
       </div>
     );
   }
 
   return (
-    <div className="source-tree" role="tree" aria-label="프로젝트 소스 트리">
+    <div className="source-tree" role="tree" aria-label={t("tree.label")}>
       {rows.map((row, index) => {
         const node = row.node;
         const isFolder = node.kind === "folder";
@@ -169,7 +171,11 @@ export function SourceTree({
             aria-level={row.level}
             aria-expanded={isFolder ? isExpanded : undefined}
             aria-selected={!isFolder ? isActive : undefined}
-            aria-label={unavailable ? `${label}, 텍스트 미리보기 불가` : label}
+            aria-label={
+              unavailable
+                ? t("tree.unavailable", { label })
+                : label
+            }
             className={`source-tree-row${isActive ? " is-active" : ""}${isSelected ? " is-related" : ""}${unavailable ? " is-unavailable" : ""}`}
             style={{ "--tree-depth": row.level - 1 } as CSSProperties}
             tabIndex={rovingPath === node.path ? 0 : -1}
@@ -190,7 +196,10 @@ export function SourceTree({
             </span>
             <span className="source-tree-name">{label}</span>
             {!isFolder ? (
-              <span className="source-tree-meta" aria-label={`${connectionCount}개 관계`}>
+              <span
+                className="source-tree-meta"
+                aria-label={t("tree.relationships", { count: connectionCount })}
+              >
                 {analysisIncluded ? "A" : ""}{connectionCount ? ` · ${connectionCount}` : ""}
               </span>
             ) : null}
@@ -199,7 +208,10 @@ export function SourceTree({
       })}
       {hiddenRowCount ? (
         <div className="source-tree-limit" role="status">
-          성능을 위해 {rows.length.toLocaleString()}개 항목만 표시했습니다. 나머지 {hiddenRowCount.toLocaleString()}개는 검색어로 좁혀 보세요.
+          {t("tree.truncated", {
+            shown: rows.length.toLocaleString(locale),
+            hidden: hiddenRowCount.toLocaleString(locale),
+          })}
         </div>
       ) : null}
     </div>

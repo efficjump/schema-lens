@@ -41,7 +41,7 @@ export async function generateMetadata(): Promise<Metadata> {
       template: "%s · Schema Lens",
     },
     description:
-      "코드와 쿼리의 실제 근거를 따라 DB 구조, 소스 흐름, 원문 코드를 함께 탐색합니다.",
+      "Explore database structure, source flow, and original code through evidence found in source and queries.",
     icons: {
       icon: "/favicon.svg",
       shortcut: "/favicon.svg",
@@ -49,13 +49,13 @@ export async function generateMetadata(): Promise<Metadata> {
     openGraph: {
       type: "website",
       title: "Schema Lens",
-      description: "소스와 SQL에서 DB ERD·소스 관계·원문 근거를 복원합니다.",
+      description: "Reconstruct DB ERDs, source relationships, and code evidence from source and SQL.",
       images: [{ url: socialImage, width: 1731, height: 909, alt: "Schema Lens source-grounded ERD" }],
     },
     twitter: {
       card: "summary_large_image",
       title: "Schema Lens",
-      description: "소스와 SQL에서 DB ERD·소스 관계·원문 근거를 복원합니다.",
+      description: "Reconstruct DB ERDs, source relationships, and code evidence from source and SQL.",
       images: [socialImage],
     },
   };
@@ -67,7 +67,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="ko">
+    <html lang="en">
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >

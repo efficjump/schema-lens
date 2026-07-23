@@ -55,6 +55,11 @@ import {
   type SourceCodeEvidence,
 } from "./SourceCodeWorkbench";
 import { SourceTree } from "./SourceTree";
+import {
+  type Locale,
+  type Translate,
+  useI18n,
+} from "@/app/i18n";
 
 type WorkspaceTab = GraphViewMode | "review" | "code";
 type ExplorerMode = GraphViewMode;
@@ -221,6 +226,7 @@ function retainRankedSource(
 async function readSourceFiles(
   documents: SourceDocumentRef[],
   signal: AbortSignal,
+  t: Translate,
   concurrency = ANALYSIS_READ_CONCURRENCY,
 ): Promise<SourceFileInput[]> {
   const results = new Array<SourceFileInput>(documents.length);
@@ -229,7 +235,9 @@ async function readSourceFiles(
     { length: Math.min(Math.max(1, concurrency), Math.max(1, documents.length)) },
     async () => {
       while (cursor < documents.length) {
-        if (signal.aborted) throw new DOMException("프로젝트 분석이 취소되었습니다.", "AbortError");
+        if (signal.aborted) {
+          throw new DOMException(t("scan.projectCancelled"), "AbortError");
+        }
         const index = cursor;
         cursor += 1;
         const document = documents[index];
@@ -237,7 +245,7 @@ async function readSourceFiles(
           path: document.path,
           content:
             document.inlineContent ??
-            (document.file ? await readBrowserFileText(document.file, signal) : ""),
+            (document.file ? await readBrowserFileText(document.file, signal, t) : ""),
           language: document.language || undefined,
         };
       }
@@ -247,7 +255,11 @@ async function readSourceFiles(
   return results;
 }
 
-async function readBrowserFileText(file: File, signal: AbortSignal): Promise<string> {
+async function readBrowserFileText(
+  file: File,
+  signal: AbortSignal,
+  t: Translate,
+): Promise<string> {
   const reader = file.stream().getReader();
   const decoder = new TextDecoder();
   const chunks: string[] = [];
@@ -258,7 +270,9 @@ async function readBrowserFileText(file: File, signal: AbortSignal): Promise<str
 
   try {
     while (true) {
-      if (signal.aborted) throw new DOMException("파일 읽기가 취소되었습니다.", "AbortError");
+      if (signal.aborted) {
+        throw new DOMException(t("scan.readCancelled"), "AbortError");
+      }
       const { done, value } = await reader.read();
       if (done) break;
       chunks.push(decoder.decode(value, { stream: true }));
@@ -290,15 +304,15 @@ function confidencePercent(confidence: Confidence | number): number {
   return 52;
 }
 
-function nodeLabel(node: GraphNode | undefined): string {
-  if (!node) return "알 수 없는 노드";
+function nodeLabel(node: GraphNode | undefined, t?: Translate): string {
+  if (!node) return t ? t("common.unknownNode") : "Unknown node";
   if (node.nodeType === "table") return node.qualifiedName;
   if (node.nodeType === "file") return node.path;
   return node.routePath ? `${node.httpMethod ?? "ROUTE"} ${node.routePath}` : node.name;
 }
 
-function nodeShortLabel(node: GraphNode | undefined): string {
-  if (!node) return "알 수 없음";
+function nodeShortLabel(node: GraphNode | undefined, t?: Translate): string {
+  if (!node) return t ? t("common.unknown") : "Unknown";
   if (node.nodeType === "table") return node.name;
   if (node.nodeType === "file") return node.name;
   return node.name;
@@ -397,7 +411,11 @@ function impactNodes(graph: AnalysisGraph, nodeId: string | null, depth = 2) {
   return results;
 }
 
-function localGraphAnswer(graph: AnalysisGraph, question: string): AnswerResult {
+function localGraphAnswer(
+  graph: AnalysisGraph,
+  question: string,
+  t: Translate,
+): AnswerResult {
   let hits = findRelevantGraphNodes(graph, question, 8);
   const normalizedQuestion = question.toLocaleLowerCase();
 
@@ -421,7 +439,10 @@ function localGraphAnswer(graph: AnalysisGraph, question: string): AnswerResult 
         kind: "excerpt",
         sourceId: id,
         quote: item.excerpt,
-        explanation: `${item.filePath}:${item.line}에서 확인한 정적 분석 근거`,
+        explanation: t("chat.localCitation", {
+          path: item.filePath,
+          line: item.line,
+        }),
       });
     });
   };
@@ -437,24 +458,29 @@ function localGraphAnswer(graph: AnalysisGraph, question: string): AnswerResult 
     if (top) {
       referencedNodeIds.push(top.table.id);
       addEvidence(top.table.evidenceIds);
-      const answer = `질문과 직접 일치하는 식별자는 찾지 못했습니다. 현재 관계가 가장 많은 테이블은 ${top.table.qualifiedName}이며 직접 연결은 ${top.count}개입니다. 테이블명이나 파일명을 포함해 질문하면 더 좁은 근거로 답할 수 있습니다.`;
+      const answer = t("chat.noIdentifier", {
+        table: top.table.qualifiedName,
+        count: top.count,
+      });
       return {
         status: "answered",
         answer,
         claims: [{ text: answer, citationIds: citations.map((citation) => citation.id) }],
         citations,
         referencedNodeIds,
-        limitations: ["LLM이 연결되지 않아 이름·관계 기반의 로컬 탐색으로 답했습니다."],
-        suggestedQuestions: [`${top.table.name} 테이블을 읽고 쓰는 파일은?`],
+        limitations: [t("chat.localLimitation")],
+        suggestedQuestions: [
+          t("chat.quickReadersWriters", { name: top.table.name }),
+        ],
       };
     }
     return {
       status: "insufficient_evidence",
-      answer: "분석 그래프에서 질문에 답할 수 있는 테이블이나 소스 노드를 찾지 못했습니다.",
+      answer: t("chat.noGraphMatch"),
       claims: [],
       citations: [],
       referencedNodeIds: [],
-      limitations: ["분석 대상에 SQL 또는 지원되는 소스 파일이 포함되었는지 확인해 주세요."],
+      limitations: [t("chat.noGraphMatchHelp")],
       suggestedQuestions: [],
     };
   }
@@ -484,10 +510,22 @@ function localGraphAnswer(graph: AnalysisGraph, question: string): AnswerResult 
       .map((edge) => graph.nodes.find((node) => node.id === (edge.source === primary.id ? edge.target : edge.source)))
       .filter((node): node is GraphNode => Boolean(node));
     const lines = [
-      `${primary.qualifiedName}은(는) ${primary.columns.length}개 컬럼과 ${primary.primaryKey.length || 0}개 기본키 컬럼이 확인됩니다.`,
-      readers.length ? `읽는 소스: ${readers.map(nodeLabel).join(", ")}` : "확인된 읽기 소스는 없습니다.",
-      writers.length ? `쓰는 소스: ${writers.map(nodeLabel).join(", ")}` : "확인된 쓰기 소스는 없습니다.",
-      relations.length ? `직접 연결된 테이블: ${relations.map(nodeShortLabel).join(", ")}` : "직접 연결된 테이블 관계는 없습니다.",
+      t("chat.tableSummary", {
+        name: primary.qualifiedName,
+        columns: primary.columns.length,
+        primaryKeys: primary.primaryKey.length || 0,
+      }),
+      readers.length
+        ? t("chat.readers", { items: readers.map((node) => nodeLabel(node, t)).join(", ") })
+        : t("chat.noReaders"),
+      writers.length
+        ? t("chat.writers", { items: writers.map((node) => nodeLabel(node, t)).join(", ") })
+        : t("chat.noWriters"),
+      relations.length
+        ? t("chat.relatedTables", {
+            items: relations.map((node) => nodeShortLabel(node, t)).join(", "),
+          })
+        : t("chat.noRelatedTables"),
     ];
     const answer = lines.join("\n");
     return {
@@ -496,8 +534,11 @@ function localGraphAnswer(graph: AnalysisGraph, question: string): AnswerResult 
       claims: [{ text: answer, citationIds: citations.map((citation) => citation.id) }],
       citations,
       referencedNodeIds,
-      limitations: ["의미 추론 없이 DDL·쿼리에서 확인한 관계만 사용했습니다."],
-      suggestedQuestions: [`${primary.name} 변경 영향은?`, `${primary.name}을 쓰는 소스는?`],
+      limitations: [t("chat.staticOnly")],
+      suggestedQuestions: [
+        t("chat.quickSourceImpact", { name: primary.name }),
+        t("chat.quickSourceWrites", { name: primary.name }),
+      ],
     };
   }
 
@@ -506,30 +547,48 @@ function localGraphAnswer(graph: AnalysisGraph, question: string): AnswerResult 
       .filter((edge) => edge.kind === "read" || edge.kind === "write")
       .map((edge) => {
         const other = graph.nodes.find((node) => node.id === (edge.source === primary.id ? edge.target : edge.source));
-        return `${edgeLabel(edge)} ${nodeShortLabel(other)}`;
+        return `${edgeLabel(edge)} ${nodeShortLabel(other, t)}`;
       });
-    const answer = `${primary.path}에서 확인된 데이터 접근은 ${operations.length ? operations.join(", ") : "없습니다"}. 이 파일에는 ${primary.symbolIds.length}개의 함수·라우트 심볼이 탐지되었습니다.`;
+    const answer = t("chat.fileSummary", {
+      path: primary.path,
+      operations: operations.length ? operations.join(", ") : t("chat.noOperations"),
+      symbols: primary.symbolIds.length,
+    });
     return {
       status: "answered",
       answer,
       claims: [{ text: answer, citationIds: citations.map((citation) => citation.id) }],
       citations,
       referencedNodeIds,
-      limitations: ["동적 쿼리 문자열과 런타임 의존성은 정적 분석만으로 누락될 수 있습니다."],
-      suggestedQuestions: [`${primary.name}이 참조하는 테이블은?`],
+      limitations: [t("chat.dynamicLimitation")],
+      suggestedQuestions: [
+        t("chat.quickReferencedTables", { name: primary.name }),
+      ],
     };
   }
 
   const owner = graph.files.find((file) => file.id === primary.fileId);
-  const answer = `${primary.name} 심볼은 ${owner?.path ?? primary.filePath}:${primary.line}에서 확인되었습니다.${primary.routePath ? ` 라우트는 ${primary.httpMethod ?? "HTTP"} ${primary.routePath}입니다.` : ""}`;
+  const answer = t("chat.symbolSummary", {
+    name: primary.name,
+    path: owner?.path ?? primary.filePath,
+    line: primary.line,
+    route: primary.routePath
+      ? t("chat.routeSummary", {
+          method: primary.httpMethod ?? "HTTP",
+          path: primary.routePath,
+        })
+      : "",
+  });
   return {
     status: "answered",
     answer,
     claims: [{ text: answer, citationIds: citations.map((citation) => citation.id) }],
     citations,
     referencedNodeIds,
-    limitations: ["호출 그래프는 명시적 import와 쿼리 사용 근거에 한정됩니다."],
-    suggestedQuestions: owner ? [`${owner.name}의 데이터 접근은?`] : [],
+    limitations: [t("chat.callGraphLimitation")],
+    suggestedQuestions: owner
+      ? [t("chat.quickDataAccess", { name: owner.name })]
+      : [],
   };
 }
 
@@ -552,16 +611,39 @@ function safeDownloadName(value: string): string {
   return normalized || "schema-lens";
 }
 
-function starterMessage(graph: AnalysisGraph): ChatMessage {
+function llmErrorMessage(
+  code: LlmErrorBody["error"]["code"],
+  t: Translate,
+): string {
+  const messageByCode: Record<LlmErrorBody["error"]["code"], Parameters<Translate>[0]> = {
+    INVALID_REQUEST: "llm.invalidRequest",
+    REQUEST_TOO_LARGE: "llm.requestTooLarge",
+    LLM_NOT_CONFIGURED: "llm.notConfigured",
+    LLM_REFUSAL: "llm.refusal",
+    LLM_INCOMPLETE: "llm.incomplete",
+    LLM_INVALID_OUTPUT: "llm.invalidOutput",
+    LLM_RATE_LIMITED: "llm.rateLimited",
+    LLM_TIMEOUT: "llm.timeout",
+    LLM_PROVIDER_ERROR: "llm.providerError",
+  };
+  return t(messageByCode[code]);
+}
+
+function starterMessage(graph: AnalysisGraph, t: Translate): ChatMessage {
   return {
     id: "assistant-intro",
     role: "assistant",
-    content: `현재 그래프에서 테이블 ${graph.stats.tableCount}개, 소스 파일 ${graph.stats.fileCount}개, 관계 ${graph.stats.relationshipCount}개를 확인했습니다. 테이블 변경 영향, 쿼리 근거, 읽기·쓰기 흐름을 질문해 보세요.`,
+    content: t("chat.starter", {
+      tables: graph.stats.tableCount,
+      files: graph.stats.fileCount,
+      relationships: graph.stats.relationshipCount,
+    }),
     local: true,
   };
 }
 
 export function SchemaLensWorkspace() {
+  const { locale, setLocale, t } = useI18n();
   const initialSources = useMemo(() => buildDemoSourceFiles(), []);
   const initialGraph = useMemo(() => analyzeSourceProject(initialSources), [initialSources]);
   const initialDocuments = useMemo<SourceDocumentRef[]>(
@@ -583,7 +665,7 @@ export function SchemaLensWorkspace() {
   const [graph, setGraph] = useState<AnalysisGraph>(initialGraph);
   const [sourceDocuments, setSourceDocuments] = useState<SourceDocumentRef[]>(initialDocuments);
   const [projectName, setProjectName] = useState("workspace-api");
-  const [projectPath, setProjectPath] = useState("내장 샘플 · browser local");
+  const [projectPath, setProjectPath] = useState(() => t("scan.demoPath"));
   const [activeTab, setActiveTab] = useState<WorkspaceTab>("database");
   const [explorerMode, setExplorerMode] = useState<ExplorerMode>("database");
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>("details");
@@ -592,7 +674,7 @@ export function SchemaLensWorkspace() {
   const [graphSearch, setGraphSearch] = useState("");
   const [zoom, setZoom] = useState(0.9);
   const [scanState, setScanState] = useState<ScanState>("ready");
-  const [scanMessage, setScanMessage] = useState("샘플 분석 완료");
+  const [scanMessage, setScanMessage] = useState(() => t("scan.demoComplete"));
   const [llmStatus, setLlmStatus] = useState<LlmStatus>({
     configured: false,
     loading: true,
@@ -601,7 +683,9 @@ export function SchemaLensWorkspace() {
   const [mappingBusy, setMappingBusy] = useState(false);
   const [mappingError, setMappingError] = useState<string | null>(null);
   const [reviewDecisions, setReviewDecisions] = useState<Record<string, ReviewDecision>>({});
-  const [messages, setMessages] = useState<ChatMessage[]>([starterMessage(initialGraph)]);
+  const [messages, setMessages] = useState<ChatMessage[]>([
+    starterMessage(initialGraph, t),
+  ]);
   const [question, setQuestion] = useState("");
   const [answerBusy, setAnswerBusy] = useState(false);
   const [openSourcePaths, setOpenSourcePaths] = useState<string[]>(
@@ -686,7 +770,7 @@ export function SchemaLensWorkspace() {
   ) {
     const normalizedPath = normalizedBrowserPath(path);
     if (!normalizedPath || !sourceDocuments.some((document) => document.path === normalizedPath)) {
-      setScanMessage(`원문을 열 수 없음 · ${path}`);
+      setScanMessage(t("scan.sourceUnavailable", { path }));
       return;
     }
     setOpenSourcePaths((current) => {
@@ -756,7 +840,7 @@ export function SchemaLensWorkspace() {
       if (!activeSourceDocument.viewable) {
         setSourceContent("");
         setSourceContentPath(null);
-        setSourceError("이 파일 형식 또는 크기는 안전한 텍스트 미리보기 범위를 벗어납니다.");
+        setSourceError(t("source.unsupported"));
         setSourceLoading(false);
         return;
       }
@@ -767,11 +851,11 @@ export function SchemaLensWorkspace() {
       const load = activeSourceDocument.inlineContent !== undefined
         ? Promise.resolve(activeSourceDocument.inlineContent)
         : activeSourceDocument.file
-          ? readBrowserFileText(activeSourceDocument.file, controller.signal)
+          ? readBrowserFileText(activeSourceDocument.file, controller.signal, t)
           : undefined;
       if (!load) {
         setSourceLoading(false);
-        setSourceError("선택한 폴더를 다시 열어야 원문을 읽을 수 있습니다.");
+        setSourceError(t("source.reopenFolder"));
         return;
       }
 
@@ -779,7 +863,7 @@ export function SchemaLensWorkspace() {
         const content = await load;
         if (cancelled || requestId !== sourceLoadRequest.current) return;
         if (content.includes("\u0000")) {
-          throw new Error("바이너리 데이터가 포함되어 텍스트로 표시하지 않았습니다.");
+          throw new Error(t("source.binary"));
         }
         rememberSourceContent(sourceContentCache.current, activeSourceDocument.path, content);
         setSourceContent(content);
@@ -789,7 +873,9 @@ export function SchemaLensWorkspace() {
         if (cancelled || requestId !== sourceLoadRequest.current) return;
         setSourceContent("");
         setSourceContentPath(null);
-        setSourceError(error instanceof Error ? error.message : "파일 원문을 읽지 못했습니다.");
+        setSourceError(
+          error instanceof Error ? error.message : t("source.readFailed"),
+        );
         setSourceLoading(false);
       }
     }
@@ -800,7 +886,7 @@ export function SchemaLensWorkspace() {
       cancelled = true;
       controller.abort();
     };
-  }, [activeSourceDocument, sourceLocation?.requestId]);
+  }, [activeSourceDocument, sourceLocation?.requestId, t]);
 
   function closeResponsivePanels(restoreFocus = true) {
     const focusTarget = inspectorOpen
@@ -913,6 +999,24 @@ export function SchemaLensWorkspace() {
     };
   }, []);
 
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => {
+      const demoLoaded =
+        projectName === "workspace-api" &&
+        sourceDocuments.every((document) => document.inlineContent !== undefined);
+      if (demoLoaded) {
+        setProjectPath(t("scan.demoPath"));
+        if (scanState === "ready") setScanMessage(t("scan.demoComplete"));
+      }
+      setMessages((current) =>
+        current.length === 1 && current[0]?.id === "assistant-intro"
+          ? [starterMessage(graph, t)]
+          : current,
+      );
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [graph, locale, projectName, scanState, sourceDocuments, t]);
+
   useEffect(
     () => () => {
       scanAbort.current?.abort();
@@ -927,8 +1031,8 @@ export function SchemaLensWorkspace() {
     const items: GraphNode[] = explorerMode === "source" ? graph.files : graph.tables;
     if (!explorerSearch.trim()) return items;
     const term = explorerSearch.toLocaleLowerCase();
-    return items.filter((node) => nodeLabel(node).toLocaleLowerCase().includes(term));
-  }, [explorerMode, explorerSearch, graph.files, graph.tables]);
+    return items.filter((node) => nodeLabel(node, t).toLocaleLowerCase().includes(term));
+  }, [explorerMode, explorerSearch, graph.files, graph.tables, t]);
 
   const connectionCountByNode = useMemo(() => {
     const counts = new Map<string, number>();
@@ -999,10 +1103,12 @@ export function SchemaLensWorkspace() {
         path: item.filePath,
         startLine: item.line,
         endLine: item.endLine,
-        label: item.description || `${item.kind} 근거`,
+        label:
+          item.description ||
+          `${item.kind} · ${t("common.evidence")}`,
         kind: item.kind,
       })),
-    [graph.evidence],
+    [graph.evidence, t],
   );
 
   function toggleFolder(path: string) {
@@ -1025,11 +1131,18 @@ export function SchemaLensWorkspace() {
     const writer = writerEdge ? graph.nodes.find((node) => node.id === writerEdge.source) : undefined;
     const writtenTable = writerEdge ? graph.nodes.find((node) => node.id === writerEdge.target) : undefined;
     return [
-      mostConnectedTable ? `${mostConnectedTable.name} 테이블 변경 영향은?` : "가장 많이 연결된 테이블은?",
-      writer && writtenTable ? `${nodeShortLabel(writer)}가 ${nodeShortLabel(writtenTable)}에 쓰는 흐름은?` : "쓰기 쿼리가 있는 파일은?",
-      "선언된 FK와 쿼리에서 추론한 JOIN을 구분해 줘",
+      mostConnectedTable
+        ? t("chat.quickTableImpact", { name: mostConnectedTable.name })
+        : t("chat.quickMostConnected"),
+      writer && writtenTable
+        ? t("chat.quickWriterFlow", {
+            writer: nodeShortLabel(writer, t),
+            table: nodeShortLabel(writtenTable, t),
+          })
+        : t("chat.quickWriteQuery"),
+      t("chat.quickFkJoin"),
     ];
-  }, [graph]);
+  }, [graph, t]);
 
   const supplementalEdges: SupplementalEdge[] = useMemo(
     () =>
@@ -1053,7 +1166,7 @@ export function SchemaLensWorkspace() {
     scanAbort.current = controller;
     scanBusyRef.current = true;
     setScanState("reading");
-    setScanMessage(`${chosenCount}개 파일을 분류하는 중`);
+    setScanMessage(t("scan.classifying", { count: chosenCount }));
 
     try {
       const rankedDocuments: RankedSourceDocument[] = [];
@@ -1096,7 +1209,7 @@ export function SchemaLensWorkspace() {
       });
       const omittedTreeCount = Math.max(0, candidateCount - documents.length);
       if (!documents.length) {
-        throw new Error("표시하거나 분석할 수 있는 파일을 찾지 못했습니다.");
+        throw new Error(t("scan.noFiles"));
       }
 
       const eligible = documents.filter(
@@ -1119,11 +1232,14 @@ export function SchemaLensWorkspace() {
       documents.forEach((document) => {
         document.analysisIncluded = analyzedPaths.has(document.path);
       });
-      const inputs = await readSourceFiles(analysisDocuments, controller.signal);
+      const inputs = await readSourceFiles(analysisDocuments, controller.signal, t);
       if (generation !== workspaceGeneration.current || controller.signal.aborted) return;
       setScanState("analyzing");
       setScanMessage(
-        `${inputs.length}개 소스 · ${(analysisBytes / 1024 / 1024).toFixed(1)}MB에서 관계를 찾는 중`,
+        t("scan.analyzing", {
+          count: inputs.length,
+          size: (analysisBytes / 1024 / 1024).toFixed(1),
+        }),
       );
       const nextGraph = await analyzeSourceProjectInWorker(inputs, {
         signal: controller.signal,
@@ -1140,8 +1256,19 @@ export function SchemaLensWorkspace() {
       const rootName = nextDocuments[0]?.path.split("/")[0];
       setProjectName(rootName || "local-project");
       const omittedAnalysisCount = Math.max(0, eligible.length - analysisDocuments.length);
+      const analysisOmitted = omittedAnalysisCount
+        ? t("scan.analysisOmitted", { count: omittedAnalysisCount })
+        : "";
+      const indexOmitted = omittedTreeCount
+        ? t("scan.indexOmitted", { count: omittedTreeCount })
+        : "";
       setProjectPath(
-        `${nextDocuments.length}개 파일 · 분석 ${inputs.length}${omittedAnalysisCount ? ` · 예산 제외 ${omittedAnalysisCount}` : ""}${omittedTreeCount ? ` · 색인 제외 ${omittedTreeCount}` : ""} · 원본 변경 없음`,
+        t("scan.inventory", {
+          files: nextDocuments.length,
+          analyzed: inputs.length,
+          analysisOmitted,
+          indexOmitted,
+        }),
       );
       setSelectedId(nextGraph.tables[0]?.id ?? nextGraph.files[0]?.id ?? null);
       const firstSourcePath = nextGraph.files[0]?.path ?? nextDocuments.find((document) => document.viewable)?.path;
@@ -1157,18 +1284,24 @@ export function SchemaLensWorkspace() {
       setExpandedFolders(collectExpandedFolders(buildSourceTree(nextDocuments), 2));
       setExplorerSearch("");
       setGraphSearch("");
-      setMessages([starterMessage(nextGraph)]);
+      setMessages([starterMessage(nextGraph, t)]);
       setScanState("ready");
       setScanMessage(
-        `분석 완료 · 파일 ${inputs.length}/${nextDocuments.length}${omittedTreeCount ? ` · 색인 제외 ${omittedTreeCount}` : ""} · 테이블 ${nextGraph.stats.tableCount} · 관계 ${nextGraph.stats.relationshipCount}`,
+        t("scan.complete", {
+          analyzed: inputs.length,
+          files: nextDocuments.length,
+          indexOmitted,
+          tables: nextGraph.stats.tableCount,
+          relationships: nextGraph.stats.relationshipCount,
+        }),
       );
     } catch (error) {
       if (generation !== workspaceGeneration.current || controller.signal.aborted) return;
       setScanState("error");
       setScanMessage(
         error instanceof Error
-          ? `분석을 마치지 못했습니다 · ${error.message}`
-          : "분석을 마치지 못했습니다 · 폴더를 다시 선택해 주세요",
+          ? t("scan.failedDetail", { detail: error.message })
+          : t("scan.failed"),
       );
     } finally {
       if (generation === workspaceGeneration.current) {
@@ -1196,7 +1329,7 @@ export function SchemaLensWorkspace() {
     setSourceDocuments(documents);
     sourceContentCache.current.clear();
     setProjectName("workspace-api");
-    setProjectPath("내장 샘플 · browser local");
+    setProjectPath(t("scan.demoPath"));
     setSelectedId(nextGraph.tables[0]?.id ?? null);
     setExplorerMode("database");
     setActiveTab("database");
@@ -1213,9 +1346,9 @@ export function SchemaLensWorkspace() {
     setSourceError(null);
     setExpandedFolders(collectExpandedFolders(buildSourceTree(documents), 2));
     setMapping(null);
-    setMessages([starterMessage(nextGraph)]);
+    setMessages([starterMessage(nextGraph, t)]);
     setScanState("ready");
-    setScanMessage("샘플 분석 완료");
+    setScanMessage(t("scan.demoComplete"));
   }
 
   async function runSemanticMapping() {
@@ -1227,7 +1360,7 @@ export function SchemaLensWorkspace() {
     mappingAbort.current = controller;
     setMappingBusy(true);
     setMappingError(null);
-    const focus = selectedNode ? nodeLabel(selectedNode) : "";
+    const focus = selectedNode ? nodeLabel(selectedNode, t) : "";
     const context = compactGraphContext(graph, focus);
     const evidenceIds = contextEvidenceIds(context);
 
@@ -1244,12 +1377,19 @@ export function SchemaLensWorkspace() {
       });
       const payload = (await response.json()) as LlmSuccess<MappingResult> | LlmErrorBody;
       if (generation !== workspaceGeneration.current || requestId !== mappingRequest.current) return;
-      if (!payload.ok) throw new Error(payload.error.message);
+      if (!payload.ok) {
+        throw new Error(llmErrorMessage(payload.error.code, t));
+      }
       setMapping(payload.data);
       setLlmStatus({ configured: true, loading: false });
       setActiveTab("review");
       setScanMessage(
-        `LLM 매핑 완료 · 검토 ${payload.data.additions.edges.length + payload.data.additions.nodes.length + payload.data.diagnostics.length}`,
+        t("mapping.complete", {
+          count:
+            payload.data.additions.edges.length +
+            payload.data.additions.nodes.length +
+            payload.data.diagnostics.length,
+        }),
       );
     } catch (error) {
       if (
@@ -1260,7 +1400,7 @@ export function SchemaLensWorkspace() {
       setMappingError(
         error instanceof Error
           ? error.message
-          : "LLM 매핑을 실행하지 못했습니다. 정적 분석 결과는 그대로 유지됩니다.",
+          : t("mapping.failed"),
       );
       setInspectorTab("ask");
     } finally {
@@ -1312,7 +1452,7 @@ export function SchemaLensWorkspace() {
       const payload = (await response.json()) as LlmSuccess<AnswerResult> | LlmErrorBody;
       if (generation !== workspaceGeneration.current || requestId !== answerRequest.current) return;
       if (!payload.ok) {
-        const fallback = localGraphAnswer(graphSnapshot, nextQuestion);
+        const fallback = localGraphAnswer(graphSnapshot, nextQuestion, t);
         setMessages((current) => [
           ...current,
           {
@@ -1333,7 +1473,12 @@ export function SchemaLensWorkspace() {
         {
           id: `assistant-${Date.now()}`,
           role: "assistant",
-          content: [payload.data.answer, ...payload.data.limitations.map((item) => `제한: ${item}`)].join("\n\n"),
+          content: [
+            payload.data.answer,
+            ...payload.data.limitations.map((item) =>
+              t("mapping.limitPrefix", { text: item }),
+            ),
+          ].join("\n\n"),
           citations: payload.data.citations,
           referencedNodeIds: payload.data.referencedNodeIds,
         },
@@ -1344,7 +1489,7 @@ export function SchemaLensWorkspace() {
         generation !== workspaceGeneration.current ||
         requestId !== answerRequest.current
       ) return;
-      const fallback = localGraphAnswer(graphSnapshot, nextQuestion);
+      const fallback = localGraphAnswer(graphSnapshot, nextQuestion, t);
       setMessages((current) => [
         ...current,
         {
@@ -1410,7 +1555,7 @@ export function SchemaLensWorkspace() {
           className="hidden-input"
           type="file"
           multiple
-          aria-label="분석할 로컬 소스 폴더 선택"
+          aria-label={t("workspace.chooseFolder")}
           onChange={handleFolderChange}
           {...({ webkitdirectory: "", directory: "" } as Record<string, string>)}
         />
@@ -1426,7 +1571,7 @@ export function SchemaLensWorkspace() {
             setInspectorOpen(false);
           }}
         >
-          탐색기
+          {t("workspace.explorer")}
         </button>
         <button
           ref={inspectorToggle}
@@ -1439,29 +1584,49 @@ export function SchemaLensWorkspace() {
             setExplorerOpen(false);
           }}
         >
-          상세
+          {t("workspace.inspector")}
         </button>
         <div className="header-spacer" />
         <div className="header-summary">
           <span className="analysis-state">
             <span className={`status-dot${scanState === "reading" || scanState === "analyzing" ? " is-busy" : scanState === "error" ? " is-offline" : ""}`} />
-            {scanState === "ready" ? "분석 최신" : scanState === "error" ? "부분 결과 유지" : "분석 중"}
+            {scanState === "ready"
+              ? t("workspace.analysisCurrent")
+              : scanState === "error"
+                ? t("workspace.partialResults")
+                : t("workspace.analyzing")}
           </span>
           <span className="header-metrics">
             TABLE {graph.stats.tableCount} · QUERY {graph.stats.readCount + graph.stats.writeCount} · EDGE {graph.stats.relationshipCount}
           </span>
         </div>
+        <label className="language-select">
+          <span>{t("language.label")}</span>
+          <select
+            value={locale}
+            onChange={(event) => setLocale(event.target.value as Locale)}
+          >
+            <option value="en">{t("language.en")}</option>
+            <option value="ko">{t("language.ko")}</option>
+          </select>
+        </label>
         <button
           type="button"
           className="button button-quiet"
           onClick={() => void runSemanticMapping()}
           disabled={mappingBusy || scanState !== "ready"}
-          title={llmStatus.configured ? "설정된 LLM으로 의미 매핑" : "LLM API 설정 시 활성화됩니다"}
+          title={
+            llmStatus.configured
+              ? t("workspace.llmMappingTitle")
+              : t("workspace.llmMappingDisabled")
+          }
         >
-          {mappingBusy ? "매핑 중…" : "LLM 정밀 매핑"}
+          {mappingBusy
+            ? t("workspace.mappingBusy")
+            : t("workspace.mappingAction")}
         </button>
         <button type="button" className="button button-primary" onClick={() => folderInput.current?.click()}>
-          폴더 열기
+          {t("workspace.openFolder")}
         </button>
       </header>
 
@@ -1469,7 +1634,7 @@ export function SchemaLensWorkspace() {
         <button
           type="button"
           className={`drawer-scrim${explorerOpen ? " has-explorer" : ""}${inspectorOpen ? " has-inspector" : ""}`}
-          aria-label="열린 패널 닫기"
+          aria-label={t("workspace.closePanel")}
           onClick={() => closeResponsivePanels()}
         />
         <aside
@@ -1477,7 +1642,7 @@ export function SchemaLensWorkspace() {
           className={`explorer${explorerOpen ? " is-open" : ""}`}
           role={explorerModal ? "dialog" : undefined}
           aria-modal={explorerModal || undefined}
-          aria-label="프로젝트 탐색기"
+          aria-label={t("workspace.explorerLabel")}
           inert={inspectorModal || undefined}
           onKeyDown={trapDrawerFocus}
         >
@@ -1490,7 +1655,7 @@ export function SchemaLensWorkspace() {
               ref={explorerClose}
               type="button"
               className="panel-close"
-              aria-label="탐색기 닫기"
+              aria-label={t("workspace.closeExplorer")}
               onClick={() => closeResponsivePanels()}
             >
               ×
@@ -1500,17 +1665,21 @@ export function SchemaLensWorkspace() {
             className="explorer-search"
             value={explorerSearch}
             onChange={(event) => setExplorerSearch(event.target.value)}
-            placeholder={explorerMode === "source" ? "파일과 폴더 검색" : "테이블과 컬럼 검색"}
-            aria-label="프로젝트 객체 검색"
+            placeholder={
+              explorerMode === "source"
+                ? t("workspace.searchFiles")
+                : t("workspace.searchData")
+            }
+            aria-label={t("workspace.searchObjects")}
           />
-          <div className="segment-control" aria-label="탐색기 뷰">
+          <div className="segment-control" aria-label={t("workspace.explorerView")}>
             <button
               type="button"
               className="segment-button"
               aria-pressed={explorerMode === "database"}
               onClick={() => setExplorerMode("database")}
             >
-              데이터
+              {t("workspace.data")}
             </button>
             <button
               type="button"
@@ -1518,7 +1687,7 @@ export function SchemaLensWorkspace() {
               aria-pressed={explorerMode === "source"}
               onClick={() => setExplorerMode("source")}
             >
-              소스
+              {t("workspace.source")}
             </button>
           </div>
 
@@ -1539,7 +1708,9 @@ export function SchemaLensWorkspace() {
             ) : (
               <>
                 <div className="tree-group">
-                  <div className="tree-group-header">데이터베이스 객체</div>
+                  <div className="tree-group-header">
+                    {t("workspace.databaseObjects")}
+                  </div>
                   <div className="tree-list">
                     {explorerItems.map((node) => (
                       <button
@@ -1554,7 +1725,7 @@ export function SchemaLensWorkspace() {
                         }}
                       >
                         <span className="tree-item-glyph">DB</span>
-                        <span className="tree-item-name">{nodeShortLabel(node)}</span>
+                        <span className="tree-item-name">{nodeShortLabel(node, t)}</span>
                         <span className="tree-item-meta">{connectionCountByNode.get(node.id) ?? 0}</span>
                       </button>
                     ))}
@@ -1563,7 +1734,9 @@ export function SchemaLensWorkspace() {
 
                 {graph.symbols.some((symbol) => symbol.kind === "route") ? (
                   <div className="tree-group">
-                    <div className="tree-group-header">감지한 엔드포인트</div>
+                    <div className="tree-group-header">
+                      {t("workspace.detectedEndpoints")}
+                    </div>
                     <div className="tree-list">
                       {graph.symbols
                         .filter((symbol) => symbol.kind === "route")
@@ -1592,16 +1765,17 @@ export function SchemaLensWorkspace() {
           </div>
 
           <div className="privacy-note">
-            <strong>Local first.</strong> 원문은 선택한 파일만 브라우저에서 읽습니다. JSON과 LLM에는 비밀값을 마스킹한 관계·근거만 전달됩니다.
+            <strong>{t("workspace.localFirst")}</strong>{" "}
+            {t("workspace.localFirstDetail")}
           </div>
         </aside>
 
         <section
           className={`workbench${activeTab === "code" ? " is-code-view" : ""}`}
-          aria-label="ERD 및 소스 작업 영역"
+          aria-label={t("workspace.mainArea")}
           inert={responsiveModalOpen || undefined}
         >
-          <div className="work-tabs" role="tablist" aria-label="관계도 종류">
+          <div className="work-tabs" role="tablist" aria-label={t("workspace.viewTabs")}>
             <button
               ref={(element) => {
                 if (element) workspaceTabRefs.current.set("database", element);
@@ -1617,7 +1791,8 @@ export function SchemaLensWorkspace() {
               onClick={() => activateWorkspaceTab("database")}
               onKeyDown={(event) => handleWorkspaceTabKeyDown(event, "database")}
             >
-              DB ERD <span className="tab-count">{graph.tables.length}</span>
+              {t("workspace.databaseErd")}{" "}
+              <span className="tab-count">{graph.tables.length}</span>
             </button>
             <button
               ref={(element) => {
@@ -1634,7 +1809,8 @@ export function SchemaLensWorkspace() {
               onClick={() => activateWorkspaceTab("source")}
               onKeyDown={(event) => handleWorkspaceTabKeyDown(event, "source")}
             >
-              소스 관계도 <span className="tab-count">{graph.files.length}</span>
+              {t("workspace.sourceGraph")}{" "}
+              <span className="tab-count">{graph.files.length}</span>
             </button>
             <button
               ref={(element) => {
@@ -1651,7 +1827,8 @@ export function SchemaLensWorkspace() {
               onClick={() => activateWorkspaceTab("code")}
               onKeyDown={(event) => handleWorkspaceTabKeyDown(event, "code")}
             >
-              소스 코드 <span className="tab-count">{openSourcePaths.length}</span>
+              {t("workspace.sourceCode")}{" "}
+              <span className="tab-count">{openSourcePaths.length}</span>
             </button>
             <button
               ref={(element) => {
@@ -1668,7 +1845,8 @@ export function SchemaLensWorkspace() {
               onClick={() => activateWorkspaceTab("review")}
               onKeyDown={(event) => handleWorkspaceTabKeyDown(event, "review")}
             >
-              매핑 검토 <span className="tab-count">{reviewCount}</span>
+              {t("workspace.mappingReview")}{" "}
+              <span className="tab-count">{reviewCount}</span>
             </button>
           </div>
 
@@ -1687,16 +1865,22 @@ export function SchemaLensWorkspace() {
                       className="toolbar-search"
                       value={graphSearch}
                       onChange={(event) => setGraphSearch(event.target.value)}
-                      placeholder="현재 그래프 검색"
-                      aria-label="현재 그래프 검색"
+                      placeholder={t("workspace.graphSearch")}
+                      aria-label={t("workspace.graphSearch")}
                     />
                   </div>
-                  <button type="button" className="button button-small" onClick={() => setGraphSearch("")}>필터 초기화</button>
+                  <button
+                    type="button"
+                    className="button button-small"
+                    onClick={() => setGraphSearch("")}
+                  >
+                    {t("workspace.clearFilter")}
+                  </button>
                   <div className="toolbar-divider" />
                   <button
                     type="button"
                     className="button button-small button-square"
-                    aria-label="축소"
+                    aria-label={t("workspace.zoomOut")}
                     onClick={() => setZoom((current) => Math.max(0.55, Number((current - 0.1).toFixed(2))))}
                   >
                     −
@@ -1705,16 +1889,24 @@ export function SchemaLensWorkspace() {
                   <button
                     type="button"
                     className="button button-small button-square"
-                    aria-label="확대"
+                    aria-label={t("workspace.zoomIn")}
                     onClick={() => setZoom((current) => Math.min(1.3, Number((current + 0.1).toFixed(2))))}
                   >
                     +
                   </button>
-                  <button type="button" className="button button-small" onClick={() => setZoom(0.9)}>화면 맞춤</button>
+                  <button
+                    type="button"
+                    className="button button-small"
+                    onClick={() => setZoom(0.9)}
+                  >
+                    {t("workspace.fit")}
+                  </button>
                   <div className="toolbar-divider" />
                 </>
               ) : (
-                <span className="toolbar-context">LLM 제안을 근거와 함께 검토합니다.</span>
+                <span className="toolbar-context">
+                  {t("workspace.reviewContext")}
+                </span>
               )}
               <span className="toolbar-spacer" />
               <button
@@ -1732,9 +1924,15 @@ export function SchemaLensWorkspace() {
                   )
                 }
               >
-                JSON 내보내기
+                {t("workspace.exportJson")}
               </button>
-              <button type="button" className="button button-small" onClick={loadDemo}>샘플 복원</button>
+              <button
+                type="button"
+                className="button button-small"
+                onClick={loadDemo}
+              >
+                {t("workspace.restoreSample")}
+              </button>
             </div>
           ) : null}
 
@@ -1811,7 +2009,7 @@ export function SchemaLensWorkspace() {
           className={`inspector${inspectorOpen ? " is-open" : ""}`}
           role={inspectorModal ? "dialog" : undefined}
           aria-modal={inspectorModal || undefined}
-          aria-label="상세 및 질문 패널"
+          aria-label={t("workspace.inspectorLabel")}
           inert={explorerModal || undefined}
           onKeyDown={trapDrawerFocus}
         >
@@ -1821,18 +2019,18 @@ export function SchemaLensWorkspace() {
               ref={inspectorClose}
               type="button"
               className="panel-close"
-              aria-label="상세 패널 닫기"
+              aria-label={t("workspace.closeInspector")}
               onClick={() => closeResponsivePanels()}
             >
               ×
             </button>
           </div>
-          <div className="side-tabs" role="tablist" aria-label="노드 정보">
+          <div className="side-tabs" role="tablist" aria-label={t("workspace.nodeInfo")}>
             {([
-              ["details", "상세"],
-              ["evidence", "근거"],
-              ["impact", "영향"],
-              ["ask", "질문"],
+              ["details", t("workspace.details")],
+              ["evidence", t("workspace.evidence")],
+              ["impact", t("workspace.impact")],
+              ["ask", t("workspace.ask")],
             ] as Array<[InspectorTab, string]>).map(([id, label]) => (
               <button
                 ref={(element) => {
@@ -1894,8 +2092,8 @@ export function SchemaLensWorkspace() {
             ) : !selectedNode ? (
               <div className="inspector-empty">
                 <div>
-                  <strong>노드를 선택해 주세요</strong>
-                  그래프 또는 탐색기에서 항목을 선택하면 관계 근거와 영향 범위를 볼 수 있습니다.
+                  <strong>{t("workspace.selectNodeTitle")}</strong>
+                  {t("workspace.selectNodeDescription")}
                 </div>
               </div>
             ) : inspectorTab === "details" ? (
@@ -1924,10 +2122,24 @@ export function SchemaLensWorkspace() {
 
       <footer className="activity-bar" inert={responsiveModalOpen || undefined}>
         <span className="activity-item"><span className={`status-dot${scanState === "reading" || scanState === "analyzing" ? " is-busy" : scanState === "error" ? " is-offline" : ""}`} /><strong>{scanMessage}</strong></span>
-        <span className="activity-item">경고 {graph.warnings.length}</span>
-        <span className="activity-item">라우트 {graph.stats.routeCount} · 함수 {graph.stats.functionCount}</span>
+        <span className="activity-item">
+          {t("workspace.warnings", { count: graph.warnings.length })}
+        </span>
+        <span className="activity-item">
+          {t("workspace.routesAndFunctions", {
+            routes: graph.stats.routeCount,
+            functions: graph.stats.functionCount,
+          })}
+        </span>
         <span className="activity-spacer" />
-        <span className="activity-item">LLM {llmStatus.loading ? "확인 중" : llmStatus.configured ? "연결됨" : "로컬 폴백"}</span>
+        <span className="activity-item">
+          LLM{" "}
+          {llmStatus.loading
+            ? t("workspace.llmChecking")
+            : llmStatus.configured
+              ? t("workspace.llmConnected")
+              : t("workspace.localFallback")}
+        </span>
       </footer>
     </main>
   );
@@ -1948,13 +2160,24 @@ function NodeDetails({
   onSelect: (id: string) => void;
   onOpenSource: (path: string, line: number) => void;
 }) {
-  const kind = node.nodeType === "table" ? "Database table" : node.nodeType === "file" ? "Source file" : node.kind;
-  const subtitle = node.nodeType === "file" ? node.path : node.nodeType === "symbol" ? `${node.filePath}:${node.line}` : node.schema ?? "default schema";
+  const { t } = useI18n();
+  const kind =
+    node.nodeType === "table"
+      ? t("details.databaseTable")
+      : node.nodeType === "file"
+        ? t("details.sourceFile")
+        : node.kind;
+  const subtitle =
+    node.nodeType === "file"
+      ? node.path
+      : node.nodeType === "symbol"
+        ? `${node.filePath}:${node.line}`
+        : node.schema ?? t("details.defaultSchema");
   return (
     <>
       <section className="detail-section">
         <p className="detail-kicker">{kind}</p>
-        <h2 className="detail-title">{nodeShortLabel(node)}</h2>
+        <h2 className="detail-title">{nodeShortLabel(node, t)}</h2>
         <p className="detail-subtitle">{subtitle}</p>
         {node.nodeType === "file" || node.nodeType === "symbol" ? (
           <div className="detail-actions">
@@ -1966,7 +2189,7 @@ function NodeDetails({
                 node.nodeType === "symbol" ? node.line : 1,
               )}
             >
-              소스 코드 열기
+              {t("details.openSource")}
             </button>
           </div>
         ) : null}
@@ -1975,15 +2198,15 @@ function NodeDetails({
           <span className="confidence-label">{confidence}%</span>
         </div>
         <dl className="detail-grid">
-          <dt>직접 연결</dt><dd>{edges.length}</dd>
-          <dt>근거</dt><dd>{node.evidenceIds.length}</dd>
-          {node.nodeType === "table" ? <><dt>컬럼</dt><dd>{node.columns.length}</dd><dt>기본키</dt><dd>{node.primaryKey.join(", ") || "없음"}</dd></> : null}
-          {node.nodeType === "file" ? <><dt>언어</dt><dd>{node.language}</dd><dt>심볼</dt><dd>{node.symbolIds.length}</dd></> : null}
-          {node.nodeType === "symbol" && node.routePath ? <><dt>HTTP</dt><dd>{node.httpMethod ?? "-"}</dd><dt>경로</dt><dd>{node.routePath}</dd></> : null}
+          <dt>{t("details.directLinks")}</dt><dd>{edges.length}</dd>
+          <dt>{t("common.evidence")}</dt><dd>{node.evidenceIds.length}</dd>
+          {node.nodeType === "table" ? <><dt>{t("details.columns")}</dt><dd>{node.columns.length}</dd><dt>{t("details.primaryKey")}</dt><dd>{node.primaryKey.join(", ") || t("common.none")}</dd></> : null}
+          {node.nodeType === "file" ? <><dt>{t("details.language")}</dt><dd>{node.language}</dd><dt>{t("details.symbols")}</dt><dd>{node.symbolIds.length}</dd></> : null}
+          {node.nodeType === "symbol" && node.routePath ? <><dt>HTTP</dt><dd>{node.httpMethod ?? "-"}</dd><dt>{t("details.path")}</dt><dd>{node.routePath}</dd></> : null}
         </dl>
       </section>
       <section className="detail-section">
-        <p className="detail-kicker">Direct connections</p>
+        <p className="detail-kicker">{t("details.directConnections")}</p>
         <div className="connection-list">
           {edges.length ? edges.slice(0, 16).map((edge) => {
             const otherId = edge.source === node.id ? edge.target : edge.source;
@@ -1991,11 +2214,11 @@ function NodeDetails({
             return (
               <button type="button" className="connection-row" key={edge.id} onClick={() => onSelect(otherId)}>
                 <span className="connection-kind">{edgeLabel(edge)}</span>
-                <span className="connection-name">{nodeLabel(other)}</span>
+                <span className="connection-name">{nodeLabel(other, t)}</span>
                 <span className="connection-confidence">{confidencePercent(edge.confidence)}%</span>
               </button>
             );
-          }) : <div className="inspector-empty"><div>직접 연결된 관계가 없습니다.</div></div>}
+          }) : <div className="inspector-empty"><div>{t("details.noDirect")}</div></div>}
         </div>
       </section>
     </>
@@ -2003,9 +2226,10 @@ function NodeDetails({
 }
 
 function EvidencePanel({ evidence, onOpen }: { evidence: Evidence[]; onOpen: (item: Evidence) => void }) {
+  const { t } = useI18n();
   return (
     <section className="detail-section">
-      <p className="detail-kicker">Source evidence · {evidence.length}</p>
+      <p className="detail-kicker">{t("details.sourceEvidence")} · {evidence.length}</p>
       {evidence.length ? (
         <div className="evidence-list">
           {evidence.map((item) => (
@@ -2016,34 +2240,35 @@ function EvidencePanel({ evidence, onOpen }: { evidence: Evidence[]; onOpen: (it
               </div>
               <pre className="evidence-code"><code>{item.excerpt}</code></pre>
               <button type="button" className="button button-small evidence-open" onClick={() => onOpen(item)}>
-                코드에서 열기
+                {t("details.openInCode")}
               </button>
             </article>
           ))}
         </div>
       ) : (
-        <div className="inspector-empty"><div><strong>직접 근거가 없습니다</strong>이 항목은 다른 관계에서 간접 추론되었을 수 있습니다.</div></div>
+        <div className="inspector-empty"><div><strong>{t("evidence.noneTitle")}</strong>{t("evidence.noneDescription")}</div></div>
       )}
     </section>
   );
 }
 
 function ImpactPanel({ impacts, onSelect }: { impacts: ReturnType<typeof impactNodes>; onSelect: (id: string) => void }) {
+  const { t } = useI18n();
   return (
     <section className="detail-section">
-      <p className="detail-kicker">Change impact · 2 hops</p>
+      <p className="detail-kicker">{t("details.changeImpact")}</p>
       {impacts.length ? (
         <div className="impact-list">
           {impacts.map((item) => (
             <button type="button" className="impact-row" key={item.node.id} onClick={() => onSelect(item.node.id)}>
               <span className="connection-kind">{item.via}</span>
-              <span className="connection-name">{nodeLabel(item.node)}</span>
-              <span className="connection-confidence">{item.depth}단계</span>
+              <span className="connection-name">{nodeLabel(item.node, t)}</span>
+              <span className="connection-confidence">{t("impact.steps", { count: item.depth })}</span>
             </button>
           ))}
         </div>
       ) : (
-        <div className="inspector-empty"><div><strong>영향 경로가 없습니다</strong>현재 분석 근거에서 연결된 항목을 찾지 못했습니다.</div></div>
+        <div className="inspector-empty"><div><strong>{t("impact.noneTitle")}</strong>{t("impact.noneDescription")}</div></div>
       )}
     </section>
   );
@@ -2076,14 +2301,25 @@ function ChatPanel({
   onSuggestion: (value: string) => void;
   onCitation: (citation: AnswerCitation) => void;
 }) {
+  const { t } = useI18n();
   return (
     <div className="chat-panel">
       <div className="chat-context">
         <div className="chat-context-row">
-          <span>{selectedNode ? `현재 선택 · ${nodeShortLabel(selectedNode)}` : "전체 프로젝트 범위"}</span>
+          <span>
+            {selectedNode
+              ? t("chat.currentSelection", {
+                  name: nodeShortLabel(selectedNode, t),
+                })
+              : t("chat.projectScope")}
+          </span>
           <span className="llm-state">
             <span className={`llm-state-dot${llmStatus.configured ? "" : " is-local"}`} />
-            {llmStatus.loading ? "연결 확인 중" : llmStatus.configured ? "외부 LLM 연결됨" : "로컬 탐색"}
+            {llmStatus.loading
+              ? t("chat.connectionChecking")
+              : llmStatus.configured
+                ? t("chat.externalConnected")
+                : t("chat.localSearch")}
           </span>
         </div>
       </div>
@@ -2091,7 +2327,13 @@ function ChatPanel({
       <div className="chat-messages" aria-live="polite">
         {messages.map((message) => (
           <article className={`message${message.role === "user" ? " is-user" : ""}`} key={message.id}>
-            <span className="message-role">{message.role === "user" ? "You" : message.local ? "Schema Lens · local" : "Schema Lens · LLM"}</span>
+            <span className="message-role">
+              {message.role === "user"
+                ? t("chat.you")
+                : message.local
+                  ? t("chat.localRole")
+                  : t("chat.llmRole")}
+            </span>
             <div className="message-bubble">{message.content}</div>
             {message.citations?.length ? (
               <div className="citation-list">
@@ -2103,7 +2345,10 @@ function ChatPanel({
                     onClick={() => onCitation(citation)}
                     title={citation.explanation}
                   >
-                    {citation.kind === "excerpt" ? "근거" : "노드"} · {citation.sourceId.slice(0, 12)}
+                    {citation.kind === "excerpt"
+                      ? t("chat.citationEvidence")
+                      : t("chat.citationNode")}{" "}
+                    · {citation.sourceId.slice(0, 12)}
                   </button>
                 ))}
               </div>
@@ -2125,7 +2370,12 @@ function ChatPanel({
             ))}
           </div>
         ) : null}
-        {busy ? <article className="message"><span className="message-role">Schema Lens</span><div className="message-bubble">근거를 따라 답을 구성하는 중…</div></article> : null}
+        {busy ? (
+          <article className="message">
+            <span className="message-role">Schema Lens</span>
+            <div className="message-bubble">{t("chat.answering")}</div>
+          </article>
+        ) : null}
       </div>
 
       <form className="chat-composer" onSubmit={onSubmit}>
@@ -2135,12 +2385,18 @@ function ChatPanel({
           disabled={disabled}
           onChange={(event) => onQuestionChange(event.target.value)}
           onKeyDown={onKeyDown}
-          placeholder="이 프로젝트의 데이터 흐름에 질문하기…"
-          aria-label="프로젝트에 질문"
+          placeholder={t("chat.placeholder")}
+          aria-label={t("chat.label")}
         />
         <div className="composer-footer">
-          <span className="composer-hint">⌘/Ctrl + Enter로 전송</span>
-          <button type="submit" className="button button-primary" disabled={!question.trim() || busy || disabled}>질문 보내기</button>
+          <span className="composer-hint">{t("chat.submitHint")}</span>
+          <button
+            type="submit"
+            className="button button-primary"
+            disabled={!question.trim() || busy || disabled}
+          >
+            {t("chat.submit")}
+          </button>
         </div>
       </form>
     </div>
@@ -2162,6 +2418,7 @@ function MappingReview({
   onRun: () => void;
   onDecision: (id: string, state: ReviewDecision["state"]) => void;
 }) {
+  const { t } = useI18n();
   const items = mapping
     ? [
         ...mapping.additions.edges.map((item) => ({
@@ -2169,21 +2426,29 @@ function MappingReview({
           title: `${item.source} → ${item.target}`,
           description: item.description,
           confidence: item.confidence,
-          meta: `${item.label} · 근거 ${item.evidenceIds.length}`,
+          meta: t("review.nodeMeta", {
+            label: item.label,
+            count: item.evidenceIds.length,
+          }),
         })),
         ...mapping.additions.nodes.map((item) => ({
           id: item.id,
           title: item.title,
           description: item.description,
           confidence: item.confidence,
-          meta: `${item.layer} · 연결 후보 ${item.mappedNodeIds.length}`,
+          meta: t("review.diagnosticMeta", {
+            layer: item.layer,
+            count: item.mappedNodeIds.length,
+          }),
         })),
         ...mapping.additions.aliases.map((item) => ({
           id: `alias-${item.term}-${item.nodeId}`,
           title: `${item.term} ≈ ${item.nodeId}`,
           description: item.description,
           confidence: item.confidence,
-          meta: `동적 용어 매핑 · 근거 ${item.evidenceIds.length}`,
+          meta: t("review.aliasMeta", {
+            count: item.evidenceIds.length,
+          }),
         })),
       ]
     : [];
@@ -2193,28 +2458,36 @@ function MappingReview({
       <div className="review-view">
         <div className="review-hero">
           <div>
-            <h2>동적 매핑 검토</h2>
-            <p>
-              정적 분석이 놓치기 쉬운 도메인 별칭과 교차 계층 관계를 LLM이 제안합니다. 근거 없는 관계는 그래프에 자동 확정하지 않습니다.
-            </p>
+            <h2>{t("review.title")}</h2>
+            <p>{t("review.description")}</p>
           </div>
           <button type="button" className="button button-primary" onClick={onRun} disabled={busy}>
-            {busy ? "분석 중…" : mapping ? "다시 추론" : "LLM 매핑 실행"}
+            {busy
+              ? t("review.analyzing")
+              : mapping
+                ? t("review.runAgain")
+                : t("review.run")}
           </button>
         </div>
 
         {error ? (
           <div className="evidence-card">
-            <div className="evidence-source"><span>LLM 연결 안내</span><span>정적 결과 유지</span></div>
+            <div className="evidence-source">
+              <span>{t("review.connectionGuide")}</span>
+              <span>{t("review.staticKept")}</span>
+            </div>
             <p className="review-description">{error}</p>
-            <p className="review-meta">LLM API를 서버 환경에 설정하면 같은 화면에서 정밀 매핑을 다시 실행할 수 있습니다.</p>
+            <p className="review-meta">{t("review.connectionDescription")}</p>
           </div>
         ) : null}
 
         {mapping ? (
           <>
             <div className="evidence-card" style={{ marginBottom: 12 }}>
-              <div className="evidence-source"><span>매핑 요약</span><span>{items.length}개 제안</span></div>
+              <div className="evidence-source">
+                <span>{t("review.summary")}</span>
+                <span>{t("review.suggestionCount", { count: items.length })}</span>
+              </div>
               <p className="review-description">{mapping.summary}</p>
             </div>
             <div className="review-list">
@@ -2223,7 +2496,11 @@ function MappingReview({
                 return (
                   <article className="review-card" key={item.id}>
                     <span className={`review-status${decision === "confirmed" ? " badge-confirmed" : decision === "excluded" ? " badge-warning" : ""}`}>
-                      {decision === "confirmed" ? "확정" : decision === "excluded" ? "제외" : "검토 필요"}
+                      {decision === "confirmed"
+                        ? t("review.confirmed")
+                        : decision === "excluded"
+                          ? t("review.excluded")
+                          : t("review.needsReview")}
                     </span>
                     <div>
                       <div className="review-title">{item.title}</div>
@@ -2233,8 +2510,8 @@ function MappingReview({
                     <div>
                       <div className="review-confidence">{Math.round(item.confidence * 100)}%</div>
                       <div style={{ display: "flex", gap: 5, marginTop: 8 }}>
-                        <button type="button" className="button button-small" onClick={() => onDecision(item.id, "confirmed")}>확정</button>
-                        <button type="button" className="button button-small button-quiet" onClick={() => onDecision(item.id, "excluded")}>제외</button>
+                        <button type="button" className="button button-small" onClick={() => onDecision(item.id, "confirmed")}>{t("review.confirm")}</button>
+                        <button type="button" className="button button-small button-quiet" onClick={() => onDecision(item.id, "excluded")}>{t("review.exclude")}</button>
                       </div>
                     </div>
                   </article>
@@ -2248,7 +2525,11 @@ function MappingReview({
                     <div className="review-description">{diagnostic.message}</div>
                     <div className="review-meta">{diagnostic.suggestion}</div>
                   </div>
-                  <div className="review-confidence">근거 {diagnostic.evidenceIds.length}</div>
+                  <div className="review-confidence">
+                    {t("review.evidenceCount", {
+                      count: diagnostic.evidenceIds.length,
+                    })}
+                  </div>
                 </article>
               ))}
             </div>
@@ -2256,9 +2537,11 @@ function MappingReview({
         ) : !error ? (
           <div className="graph-empty">
             <div className="empty-copy">
-              <h2>검토할 LLM 매핑이 없습니다</h2>
-              <p>정적 분석 결과는 이미 사용할 수 있습니다. LLM 정밀 매핑을 실행하면 별칭, 도메인 객체, 불명확한 관계를 근거와 함께 제안합니다.</p>
-              <button type="button" className="button button-primary" onClick={onRun}>정밀 매핑 시작</button>
+              <h2>{t("review.emptyTitle")}</h2>
+              <p>{t("review.emptyDescription")}</p>
+              <button type="button" className="button button-primary" onClick={onRun}>
+                {t("review.start")}
+              </button>
             </div>
           </div>
         ) : null}

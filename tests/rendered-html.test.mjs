@@ -33,9 +33,9 @@ test("server-renders the Schema Lens workspace and social metadata", async () =>
   const html = await response.text();
   assert.match(html, /<title>Schema Lens[^<]*<\/title>/i);
   assert.match(html, /DB ERD/);
-  assert.match(html, /소스 관계도/);
-  assert.match(html, /소스 코드/);
-  assert.match(html, /LLM 정밀 매핑/);
+  assert.match(html, /Source graph/);
+  assert.match(html, /Source code/);
+  assert.match(html, /Refine with LLM/);
   assert.match(html, /property="og:image"[^>]+\/og\.png/);
   assert.doesNotMatch(html, /preview-placeholder|Your site is taking shape|react-loading-skeleton/i);
   const csp = response.headers.get("content-security-policy") ?? "";
@@ -94,7 +94,7 @@ test("reports a local fallback when the server LLM key is absent", async () => {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
-        question: "어떤 테이블이 있나요?",
+        question: "Which tables are available?",
         graph: { nodes: [], edges: [] },
         evidence: [],
       }),

@@ -228,6 +228,29 @@ select:focus-visible,
   white-space: nowrap;
 }
 
+.language-select {
+  min-height: 32px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  color: var(--text-muted);
+  background: var(--panel);
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.language-select select {
+  min-width: 72px;
+  border: 0;
+  color: var(--text);
+  background: transparent;
+  font-size: 11px;
+  font-weight: 600;
+}
+
 .analysis-state {
   display: inline-flex;
   align-items: center;
@@ -647,21 +670,22 @@ select:focus-visible,
 .work-tabs {
   min-width: 0;
   display: flex;
-  align-items: end;
+  align-items: center;
   gap: 2px;
-  padding: 0 10px;
+  padding: 4px 10px;
   border-bottom: 1px solid var(--border);
   background: var(--panel);
   overflow-x: auto;
 }
 
 .work-tab {
-  height: 41px;
+  height: 33px;
   display: inline-flex;
   align-items: center;
   gap: 7px;
   padding: 0 13px;
-  border-bottom: 2px solid transparent;
+  border: 1px solid transparent;
+  border-radius: 7px;
   color: var(--text-muted);
   background: transparent;
   cursor: pointer;
@@ -669,8 +693,10 @@ select:focus-visible,
 }
 
 .work-tab[aria-selected="true"] {
-  color: var(--text);
-  border-bottom-color: var(--focus);
+  color: var(--focus);
+  border-color: rgba(92, 182, 255, 0.2);
+  background: var(--focus-soft);
+  font-weight: 650;
 }
 
 .tab-count,
@@ -1071,15 +1097,14 @@ select:focus-visible,
   display: flex;
   align-items: stretch;
   border-right: 1px solid var(--border);
-  border-bottom: 2px solid transparent;
   color: var(--text-muted);
   background: #0d141c;
 }
 
 .code-tab.is-active {
-  color: var(--text);
-  border-bottom-color: var(--focus);
-  background: #111a23;
+  color: var(--focus);
+  background: var(--focus-soft);
+  font-weight: 650;
 }
 
 .code-tab-activate {
@@ -1411,19 +1436,9 @@ button.code-line-number {
 }
 
 .side-tab[aria-selected="true"] {
-  color: var(--text);
-  background: rgba(255, 255, 255, 0.02);
-}
-
-.side-tab[aria-selected="true"]::after {
-  content: "";
-  position: absolute;
-  left: 18%;
-  right: 18%;
-  bottom: 0;
-  height: 2px;
-  border-radius: 2px 2px 0 0;
-  background: var(--focus);
+  color: var(--focus);
+  background: var(--focus-soft);
+  font-weight: 650;
 }
 
 .inspector-body {
@@ -1976,6 +1991,19 @@ button.code-line-number {
   .header-summary,
   .project-path {
     display: none;
+  }
+
+  .language-select {
+    gap: 0;
+  }
+
+  .language-select > span {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
   }
 
   .code-header {
